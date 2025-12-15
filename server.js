@@ -3,7 +3,8 @@ const express = require('express');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const SHEET_ID = '2PACX-1vQL2uV2BS5DCGOlUQx4X2A7ABEWgC-c3CYA46B3S92pUG5H8VhFXta7qL00F3XjdqolkZ9jEPIqrp3Q';
+const SHEET_ID = process.env.SHEET_ID
+  || '2PACX-1vQL2uV2BS5DCGOI0Qx4X2A7ABEWgC-c3CYA46B3S92pUG5H8VhFXta7qL00F3XjdqolkZ9jEPIqrp3Q';
 const SHEET_NAME = process.env.SHEET_NAME || 'DPC';
 const SHEET_GID = process.env.SHEET_GID; // mais robusto quando o nome da aba muda
 const RANGE = 'A1:B5';
