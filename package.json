@@ -1,0 +1,17 @@
+{
+  "name": "app-dpc",
+  "version": "1.0.0",
+  "description": "Webservice Render que mostra A1:B5 da aba DPC da planilha publicada",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^5.2.1",
+    "node-fetch": "^3.3.2"
+  }
+}

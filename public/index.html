@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>APP DPC - Planilha</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="frame">
+    <header>
+      <p class="eyebrow">APP DPC</p>
+      <h1>Aba DPC — Células A1:B5</h1>
+      <p class="muted">Leitura direta da planilha publicada no Google Sheets.</p>
+      <div class="actions">
+        <button id="reload">Atualizar</button>
+        <span id="status" class="status">Carregando...</span>
+      </div>
+    </header>
+
+    <main>
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <p class="label">Planilha</p>
+            <p class="value">DPC / A1:B5</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="sheet-table" aria-live="polite">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const table = document.getElementById('sheet-table');
+    const reloadBtn = document.getElementById('reload');
+
+    async function loadData() {
+      statusEl.textContent = 'Carregando...';
+      reloadBtn.disabled = true;
+      try {
+        const res = await fetch('/api/data');
+        if (!res.ok) throw new Error('Erro ao buscar dados');
+        const { data } = await res.json();
+        renderTable(data || []);
+        statusEl.textContent = 'Dados atualizados agora';
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = 'Falha ao carregar';
+      } finally {
+        reloadBtn.disabled = false;
+      }
+    }
+
+    function renderTable(rows) {
+      const thead = table.querySelector('thead');
+      const tbody = table.querySelector('tbody');
+      thead.innerHTML = '';
+      tbody.innerHTML = '';
+
+      if (!rows.length) {
+        tbody.innerHTML = '<tr><td class="empty">Nenhum dado retornado</td></tr>';
+        return;
+      }
+
+      // Usa a primeira linha como cabeçalho.
+      const [header, ...rest] = rows;
+      const headerRow = document.createElement('tr');
+      header.forEach(cell => {
+        const th = document.createElement('th');
+        th.textContent = cell;
+        headerRow.appendChild(th);
+      });
+      thead.appendChild(headerRow);
+
+      rest.forEach(row => {
+        const tr = document.createElement('tr');
+        row.forEach(cell => {
+          const td = document.createElement('td');
+          td.textContent = cell;
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+    }
+
+    reloadBtn.addEventListener('click', loadData);
+    loadData();
+  </script>
+</body>
+</html>

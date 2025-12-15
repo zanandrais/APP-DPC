@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: app-dpc
+    env: node
+    buildCommand: npm install
+    startCommand: npm start
+    plan: free
+    envVars:
+      - key: SHEET_NAME
+        value: DPC
