@@ -6,15 +6,15 @@
   <title>APP DPC - Planilha</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <div class="frame">
     <header>
       <p class="eyebrow">APP DPC</p>
-      <h1>Aba DPC — Células A1:B5</h1>
-      <p class="muted">Leitura direta da planilha publicada no Google Sheets.</p>
+      <h1>Aba DPC - Visao organizada</h1>
+      <p class="muted">Leitura da planilha publicada com uma linha organizada por turma.</p>
       <div class="actions">
         <button id="reload">Atualizar</button>
         <span id="status" class="status">Carregando...</span>
@@ -29,11 +29,8 @@
             <p class="value">DPC / A1:B5</p>
           </div>
         </div>
-        <div class="table-wrap">
-          <table id="sheet-table" aria-live="polite">
-            <thead></thead>
-            <tbody></tbody>
-          </table>
+        <div id="sheet-board" class="sheet-board" aria-live="polite">
+          <p class="empty">Carregando...</p>
         </div>
       </div>
     </main>
@@ -41,56 +38,99 @@
 
   <script>
     const statusEl = document.getElementById('status');
-    const table = document.getElementById('sheet-table');
+    const board = document.getElementById('sheet-board');
     const reloadBtn = document.getElementById('reload');
 
     async function loadData() {
       statusEl.textContent = 'Carregando...';
       reloadBtn.disabled = true;
+
       try {
         const res = await fetch('/api/data');
         if (!res.ok) throw new Error('Erro ao buscar dados');
+
         const { data } = await res.json();
-        renderTable(data || []);
+        renderBoard(data || []);
         statusEl.textContent = 'Dados atualizados agora';
       } catch (err) {
         console.error(err);
+        renderBoard([]);
         statusEl.textContent = 'Falha ao carregar';
       } finally {
         reloadBtn.disabled = false;
       }
     }
 
-    function renderTable(rows) {
-      const thead = table.querySelector('thead');
-      const tbody = table.querySelector('tbody');
-      thead.innerHTML = '';
-      tbody.innerHTML = '';
+    function normalizeRows(rows) {
+      return (rows || [])
+        .map((row) => ({
+          left: String(row?.[0] || '').trim(),
+          right: row.slice(1).join(',').trim()
+        }))
+        .filter((row) => row.left || row.right);
+    }
 
-      if (!rows.length) {
-        tbody.innerHTML = '<tr><td class="empty">Nenhum dado retornado</td></tr>';
+    function buildLines(text) {
+      return String(text || '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+    }
+
+    function renderBoard(rows) {
+      board.innerHTML = '';
+      const normalizedRows = normalizeRows(rows);
+
+      if (!normalizedRows.length) {
+        board.innerHTML = '<p class="empty">Nenhum dado retornado</p>';
         return;
       }
 
-      // Usa a primeira linha como cabeçalho.
-      const [header, ...rest] = rows;
-      const headerRow = document.createElement('tr');
-      header.forEach(cell => {
-        const th = document.createElement('th');
-        th.textContent = cell;
-        headerRow.appendChild(th);
-      });
-      thead.appendChild(headerRow);
+      const topRow = normalizedRows[0];
+      const topSection = document.createElement('section');
+      topSection.className = 'sheet-top';
+      topSection.innerHTML = `
+        <p class="sheet-top-label">Topo da aba</p>
+        <div class="sheet-top-value">${topRow.right || '-'}</div>
+      `;
+      board.appendChild(topSection);
 
-      rest.forEach(row => {
-        const tr = document.createElement('tr');
-        row.forEach(cell => {
-          const td = document.createElement('td');
-          td.textContent = cell;
-          tr.appendChild(td);
-        });
-        tbody.appendChild(tr);
+      const list = document.createElement('div');
+      list.className = 'sheet-list';
+
+      normalizedRows.slice(1).forEach((row) => {
+        const section = document.createElement('section');
+        section.className = 'sheet-row';
+
+        const title = document.createElement('div');
+        title.className = 'sheet-row-title';
+        title.textContent = row.left || 'Sem titulo';
+
+        const content = document.createElement('div');
+        content.className = 'sheet-row-content';
+
+        const lines = buildLines(row.right);
+
+        if (!lines.length) {
+          const emptyLine = document.createElement('p');
+          emptyLine.className = 'sheet-line is-empty';
+          emptyLine.textContent = 'Sem conteudo';
+          content.appendChild(emptyLine);
+        } else {
+          lines.forEach((line) => {
+            const paragraph = document.createElement('p');
+            paragraph.className = 'sheet-line';
+            paragraph.textContent = line;
+            content.appendChild(paragraph);
+          });
+        }
+
+        section.appendChild(title);
+        section.appendChild(content);
+        list.appendChild(section);
       });
+
+      board.appendChild(list);
     }
 
     reloadBtn.addEventListener('click', loadData);

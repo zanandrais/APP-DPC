@@ -30,6 +30,74 @@ const sheetUrl = () => {
   );
 };
 
+function parseCsv(csvText) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let i = 0;
+  let inQuotes = false;
+
+  while (i < csvText.length) {
+    const char = csvText[i];
+    const next = csvText[i + 1];
+
+    if (inQuotes) {
+      if (char === '"' && next === '"') {
+        field += '"';
+        i += 2;
+        continue;
+      }
+
+      if (char === '"') {
+        inQuotes = false;
+        i += 1;
+        continue;
+      }
+
+      field += char;
+      i += 1;
+      continue;
+    }
+
+    if (char === '"') {
+      inQuotes = true;
+      i += 1;
+      continue;
+    }
+
+    if (char === ',') {
+      row.push(field.trim());
+      field = '';
+      i += 1;
+      continue;
+    }
+
+    if (char === '\r') {
+      i += 1;
+      continue;
+    }
+
+    if (char === '\n') {
+      row.push(field.trim());
+      rows.push(row);
+      row = [];
+      field = '';
+      i += 1;
+      continue;
+    }
+
+    field += char;
+    i += 1;
+  }
+
+  if (field.length > 0 || row.length > 0) {
+    row.push(field.trim());
+    rows.push(row);
+  }
+
+  return rows;
+}
+
 async function fetchSheet() {
   const url = sheetUrl();
   const res = await fetchFn(url);
@@ -37,11 +105,8 @@ async function fetchSheet() {
   if (!res.ok) {
     throw new Error(`Google Sheets respondeu ${res.status} - body: ${csv.slice(0, 300)}`);
   }
-  // Parse simples CSV (sem virgulas internas)
-  return csv
-    .trim()
-    .split(/\r?\n/)
-    .map((row) => row.split(','));
+
+  return parseCsv(csv);
 }
 
 app.use(express.static(path.join(__dirname, 'public')));
