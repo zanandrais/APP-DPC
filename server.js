@@ -7,26 +7,27 @@ const SHEET_ID = process.env.SHEET_ID
   || '2PACX-1vQL2uV2BS5DCGOI0Qx4X2A7ABEWgC-c3CYA46B3S92pUG5H8VhFXta7qL00F3XjdqolkZ9jEPIqrp3Q';
 const SHEET_NAME = process.env.SHEET_NAME || 'DPC';
 const SHEET_GID = process.env.SHEET_GID; // mais robusto quando o nome da aba muda
-const RANGE = 'A1:B5';
+const RANGE_DPC = 'A1:B5';
+const RANGE_AGENDA = 'F5:T43';
 
 // Usa fetch nativo no Node 18+ ou faz fallback para node-fetch.
 const fetchFn = typeof fetch === 'function'
   ? fetch
   : (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
-const sheetUrl = () => {
+const sheetUrl = (range) => {
   if (SHEET_GID) {
     // Link publicado com gid; usa output=csv.
     return (
       `https://docs.google.com/spreadsheets/d/e/${SHEET_ID}/pub` +
-      `?gid=${encodeURIComponent(SHEET_GID)}&single=true&output=csv&range=${encodeURIComponent(RANGE)}`
+      `?gid=${encodeURIComponent(SHEET_GID)}&single=true&output=csv&range=${encodeURIComponent(range)}`
     );
   }
 
   // Padrão usando o nome da aba.
   return (
     `https://docs.google.com/spreadsheets/d/e/${SHEET_ID}/gviz/tq` +
-    `?tqx=out:csv&sheet=${encodeURIComponent(SHEET_NAME)}&range=${encodeURIComponent(RANGE)}`
+    `?tqx=out:csv&sheet=${encodeURIComponent(SHEET_NAME)}&range=${encodeURIComponent(range)}`
   );
 };
 
@@ -98,8 +99,8 @@ function parseCsv(csvText) {
   return rows;
 }
 
-async function fetchSheet() {
-  const url = sheetUrl();
+async function fetchSheet(range) {
+  const url = sheetUrl(range);
   const res = await fetchFn(url);
   const csv = await res.text();
   if (!res.ok) {
@@ -113,11 +114,21 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/data', async (_req, res) => {
   try {
-    const data = await fetchSheet();
+    const data = await fetchSheet(RANGE_DPC);
     res.json({ data });
   } catch (err) {
     console.error('[fetchSheet] erro:', err);
     res.status(500).json({ error: 'Falha ao buscar a planilha', detail: err.message });
+  }
+});
+
+app.get('/api/agenda', async (_req, res) => {
+  try {
+    const data = await fetchSheet(RANGE_AGENDA);
+    res.json({ data });
+  } catch (err) {
+    console.error('[fetchSheet agenda] erro:', err);
+    res.status(500).json({ error: 'Falha ao buscar agenda da planilha', detail: err.message });
   }
 });
 

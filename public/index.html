@@ -14,7 +14,7 @@
     <header>
       <p class="eyebrow">APP DPC</p>
       <h1>Aba DPC - Visao organizada</h1>
-      <p class="muted">Leitura da planilha publicada com uma linha organizada por turma.</p>
+      <p class="muted">Agora com a aba Agenda usando o intervalo F5:T43.</p>
       <div class="actions">
         <button id="reload">Atualizar</button>
         <span id="status" class="status">Carregando...</span>
@@ -26,11 +26,28 @@
         <div class="card-header">
           <div>
             <p class="label">Planilha</p>
-            <p class="value">DPC / A1:B5</p>
+            <p id="view-title" class="value">DPC / A1:B5</p>
+          </div>
+          <div class="tab-switch" role="tablist" aria-label="Abas de visualizacao">
+            <button id="tab-dpc" class="tab-btn is-active" data-tab="dpc" type="button" role="tab" aria-selected="true">DPC</button>
+            <button id="tab-agenda" class="tab-btn" data-tab="agenda" type="button" role="tab" aria-selected="false">Agenda</button>
           </div>
         </div>
-        <div id="sheet-board" class="sheet-board" aria-live="polite">
-          <p class="empty">Carregando...</p>
+
+        <div class="card-content">
+          <section id="view-dpc" class="tab-view is-active">
+            <div id="sheet-board" class="sheet-board" aria-live="polite">
+              <p class="empty">Carregando...</p>
+            </div>
+          </section>
+
+          <section id="view-agenda" class="tab-view">
+            <div class="agenda-wrap">
+              <table id="agenda-table" class="agenda-table" aria-live="polite">
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
         </div>
       </div>
     </main>
@@ -38,26 +55,80 @@
 
   <script>
     const statusEl = document.getElementById('status');
-    const board = document.getElementById('sheet-board');
     const reloadBtn = document.getElementById('reload');
+    const viewTitleEl = document.getElementById('view-title');
+    const board = document.getElementById('sheet-board');
+    const agendaTable = document.getElementById('agenda-table');
+    const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
+    const dpcView = document.getElementById('view-dpc');
+    const agendaView = document.getElementById('view-agenda');
 
-    async function loadData() {
+    const TAB_CONFIG = {
+      dpc: {
+        title: 'DPC / A1:B5',
+        endpoint: '/api/data'
+      },
+      agenda: {
+        title: 'DPC / F5:T43',
+        endpoint: '/api/agenda'
+      }
+    };
+
+    const cache = {
+      dpc: null,
+      agenda: null
+    };
+
+    let activeTab = 'dpc';
+
+    function setActiveTab(tab) {
+      activeTab = tab;
+      viewTitleEl.textContent = TAB_CONFIG[tab].title;
+
+      const dpcIsActive = tab === 'dpc';
+      dpcView.classList.toggle('is-active', dpcIsActive);
+      agendaView.classList.toggle('is-active', !dpcIsActive);
+
+      tabButtons.forEach((button) => {
+        const isActive = button.dataset.tab === tab;
+        button.classList.toggle('is-active', isActive);
+        button.setAttribute('aria-selected', String(isActive));
+      });
+    }
+
+    async function loadData(force = false) {
       statusEl.textContent = 'Carregando...';
       reloadBtn.disabled = true;
 
       try {
-        const res = await fetch('/api/data');
+        if (!force && cache[activeTab]) {
+          renderByTab(activeTab, cache[activeTab]);
+          statusEl.textContent = 'Dados atualizados agora';
+          return;
+        }
+
+        const res = await fetch(TAB_CONFIG[activeTab].endpoint, { cache: 'no-store' });
         if (!res.ok) throw new Error('Erro ao buscar dados');
 
-        const { data } = await res.json();
-        renderBoard(data || []);
+        const payload = await res.json();
+        const rows = Array.isArray(payload?.data) ? payload.data : [];
+        cache[activeTab] = rows;
+        renderByTab(activeTab, rows);
         statusEl.textContent = 'Dados atualizados agora';
       } catch (err) {
         console.error(err);
-        renderBoard([]);
+        renderByTab(activeTab, []);
         statusEl.textContent = 'Falha ao carregar';
       } finally {
         reloadBtn.disabled = false;
+      }
+    }
+
+    function renderByTab(tab, rows) {
+      if (tab === 'agenda') {
+        renderAgenda(rows);
+      } else {
+        renderDpc(rows);
       }
     }
 
@@ -77,7 +148,7 @@
         .filter(Boolean);
     }
 
-    function renderBoard(rows) {
+    function renderDpc(rows) {
       board.innerHTML = '';
       const normalizedRows = normalizeRows(rows);
 
@@ -133,7 +204,57 @@
       board.appendChild(list);
     }
 
-    reloadBtn.addEventListener('click', loadData);
+    function normalizeAgendaRows(rows) {
+      const width = Math.max(1, ...(rows || []).map((row) => row.length));
+      return (rows || []).map((row) => {
+        return Array.from({ length: width }, (_unused, index) => String(row[index] || '').trim());
+      });
+    }
+
+    function renderAgenda(rows) {
+      const tbody = agendaTable.querySelector('tbody');
+      tbody.innerHTML = '';
+
+      const matrix = normalizeAgendaRows(rows);
+      if (!matrix.length) {
+        tbody.innerHTML = '<tr><td class="empty">Nenhum dado retornado</td></tr>';
+        return;
+      }
+
+      matrix.forEach((row, rowIndex) => {
+        const tr = document.createElement('tr');
+
+        row.forEach((cell) => {
+          const td = document.createElement('td');
+          td.textContent = cell;
+
+          if (rowIndex === 0 && cell) {
+            td.classList.add('agenda-month');
+          } else if (/^\d{1,2}$/.test(cell)) {
+            td.classList.add('agenda-day');
+          } else if (cell) {
+            td.classList.add('agenda-text');
+          }
+
+          tr.appendChild(td);
+        });
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    tabButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        const nextTab = button.dataset.tab;
+        if (!TAB_CONFIG[nextTab] || nextTab === activeTab) return;
+        setActiveTab(nextTab);
+        loadData();
+      });
+    });
+
+    reloadBtn.addEventListener('click', () => loadData(true));
+
+    setActiveTab('dpc');
     loadData();
   </script>
 </body>

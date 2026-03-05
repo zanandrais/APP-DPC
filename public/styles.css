@@ -110,8 +110,46 @@ main {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
   padding: 16px 18px;
   border-bottom: 1px solid var(--border);
+}
+
+.card-content {
+  padding: 20px;
+}
+
+.tab-switch {
+  display: inline-flex;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.tab-btn {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-weight: 700;
+}
+
+.tab-btn.is-active {
+  color: #06111e;
+  background: linear-gradient(120deg, var(--accent), #26b6ff);
+  border-color: rgba(38, 182, 255, 0.35);
+}
+
+.tab-view {
+  display: none;
+}
+
+.tab-view.is-active {
+  display: block;
 }
 
 .label {
@@ -131,7 +169,6 @@ main {
 .sheet-board {
   display: grid;
   gap: 18px;
-  padding: 20px;
 }
 
 .sheet-top {
@@ -220,6 +257,50 @@ main {
   color: var(--muted);
 }
 
+.agenda-wrap {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.agenda-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  min-width: 1100px;
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.agenda-table td {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 8px 10px;
+  min-width: 70px;
+  vertical-align: top;
+  color: #cfd7ee;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: pre-line;
+}
+
+.agenda-table td.agenda-month {
+  font-size: 26px;
+  font-weight: 700;
+  text-align: center;
+  color: #f6f8ff;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.agenda-table td.agenda-day {
+  text-align: center;
+  font-weight: 700;
+  color: #b6d5ff;
+  background: rgba(88, 149, 255, 0.2);
+}
+
+.agenda-table td.agenda-text {
+  color: #f4f7ff;
+}
+
 @media (max-width: 640px) {
   body {
     padding: 18px;
@@ -236,6 +317,18 @@ main {
   .actions {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .card-content {
+    padding: 14px;
+  }
+
+  .tab-switch {
+    width: 100%;
+  }
+
+  .tab-btn {
+    flex: 1;
   }
 
   .sheet-row {
