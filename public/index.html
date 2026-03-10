@@ -1,261 +1,510 @@
 <!doctype html>
 <html lang="pt-BR">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>APP DPC - Planilha</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css">
-</head>
-<body>
-  <div class="frame">
-    <header>
-      <p class="eyebrow">APP DPC</p>
-      <h1>Aba DPC - Visao organizada</h1>
-      <p class="muted">Agora com a aba Agenda usando o intervalo F5:T43.</p>
-      <div class="actions">
-        <button id="reload">Atualizar</button>
-        <span id="status" class="status">Carregando...</span>
-      </div>
-    </header>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chamada por Turma</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="hero">
+        <p class="tag">Google Sheets + Render</p>
+        <h1>Chamada por Turma</h1>
+        <p class="subtitle">
+          Use a aba <strong>Nomes</strong> para chamada e a aba
+          <strong>Listas</strong> para abrir exercicios por ano.
+        </p>
+      </section>
 
-    <main>
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <p class="label">Planilha</p>
-            <p id="view-title" class="value">DPC / A1:B5</p>
-          </div>
-          <div class="tab-switch" role="tablist" aria-label="Abas de visualizacao">
-            <button id="tab-dpc" class="tab-btn is-active" data-tab="dpc" type="button" role="tab" aria-selected="true">DPC</button>
-            <button id="tab-agenda" class="tab-btn" data-tab="agenda" type="button" role="tab" aria-selected="false">Agenda</button>
-          </div>
-        </div>
+      <nav class="tab-nav" aria-label="Abas da aplicacao">
+        <button type="button" class="tab-btn is-active" data-tab="chamada">Chamada</button>
+        <button type="button" class="tab-btn" data-tab="listas">Listas</button>
+      </nav>
 
-        <div class="card-content">
-          <section id="view-dpc" class="tab-view is-active">
-            <div id="sheet-board" class="sheet-board" aria-live="polite">
-              <p class="empty">Carregando...</p>
-            </div>
+      <section id="tab-chamada" class="tab-panel is-active">
+        <div class="view-stack">
+          <section class="panel controls-panel">
+            <form id="filterForm" class="filters">
+              <label class="field">
+                <span>Data</span>
+                <input id="dateInput" name="date" type="text" placeholder="23/2" />
+              </label>
+              <label class="field">
+                <span>Turma</span>
+                <select id="turmaSelect" name="turma"></select>
+              </label>
+              <button id="loadBtn" type="submit">Carregar chamada</button>
+            </form>
+            <div id="sheetInfo" class="sheet-info">Carregando...</div>
           </section>
 
-          <section id="view-agenda" class="tab-view">
-            <div class="agenda-wrap">
-              <table id="agenda-table" class="agenda-table" aria-live="polite">
-                <tbody></tbody>
-              </table>
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Alunos</h2>
+              <span id="status" class="status">Aguardando...</span>
             </div>
+            <ul id="studentList" class="name-list" aria-live="polite"></ul>
           </section>
         </div>
-      </div>
+      </section>
+
+      <section id="tab-listas" class="tab-panel">
+        <div class="view-stack">
+          <section class="panel controls-panel">
+            <form id="listaFilterForm" class="filters">
+              <label class="field">
+                <span>Lista</span>
+                <select id="listaNomeSelect" name="lista"></select>
+              </label>
+              <label class="field">
+                <span>Ano</span>
+                <select id="listaAnoSelect" name="ano"></select>
+              </label>
+              <button id="listaLoadBtn" type="submit">Carregar lista</button>
+            </form>
+            <div id="listaInfo" class="sheet-info">Carregando...</div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Exercicios</h2>
+              <span id="listaStatus" class="status">Aguardando...</span>
+            </div>
+            <ul id="listaItems" class="name-list" aria-live="polite"></ul>
+          </section>
+        </div>
+      </section>
     </main>
-  </div>
 
-  <script>
-    const statusEl = document.getElementById('status');
-    const reloadBtn = document.getElementById('reload');
-    const viewTitleEl = document.getElementById('view-title');
-    const board = document.getElementById('sheet-board');
-    const agendaTable = document.getElementById('agenda-table');
-    const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
-    const dpcView = document.getElementById('view-dpc');
-    const agendaView = document.getElementById('view-agenda');
+    <script>
+      const tabButtons = document.querySelectorAll(".tab-btn");
+      const tabPanels = document.querySelectorAll(".tab-panel");
 
-    const TAB_CONFIG = {
-      dpc: {
-        title: 'DPC / A1:B5',
-        endpoint: '/api/data'
-      },
-      agenda: {
-        title: 'DPC / F5:T43',
-        endpoint: '/api/agenda'
+      const statusEl = document.getElementById("status");
+      const studentListEl = document.getElementById("studentList");
+      const dateInputEl = document.getElementById("dateInput");
+      const turmaSelectEl = document.getElementById("turmaSelect");
+      const loadBtnEl = document.getElementById("loadBtn");
+      const formEl = document.getElementById("filterForm");
+      const sheetInfoEl = document.getElementById("sheetInfo");
+
+      const listaFormEl = document.getElementById("listaFilterForm");
+      const listaNomeSelectEl = document.getElementById("listaNomeSelect");
+      const listaAnoSelectEl = document.getElementById("listaAnoSelect");
+      const listaLoadBtnEl = document.getElementById("listaLoadBtn");
+      const listaInfoEl = document.getElementById("listaInfo");
+      const listaItemsEl = document.getElementById("listaItems");
+      const listaStatusEl = document.getElementById("listaStatus");
+
+      const localCellValues = new Map();
+      const savingCells = new Set();
+      let latestMeta = null;
+      let latestListaMeta = null;
+
+      const norm = (v) => String(v || "").trim().toUpperCase();
+      const cellKey = (sheet, cell) => `${sheet}|${cell}`;
+      const setStatus = (text) => (statusEl.textContent = text);
+      const setListaStatus = (text) => (listaStatusEl.textContent = text);
+      const studentCell = (student, col) => student.cell || `${col}${student.rowNumber}`;
+
+      function setActiveTab(tabName) {
+        tabButtons.forEach((button) => {
+          button.classList.toggle("is-active", button.dataset.tab === tabName);
+        });
+        tabPanels.forEach((panel) => {
+          panel.classList.toggle("is-active", panel.id === `tab-${tabName}`);
+        });
       }
-    };
 
-    const cache = {
-      dpc: null,
-      agenda: null
-    };
+      for (const button of tabButtons) {
+        button.addEventListener("click", () => {
+          const tabName = button.dataset.tab || "chamada";
+          setActiveTab(tabName);
+        });
+      }
 
-    let activeTab = 'dpc';
+      function getValue(sheet, cell, fallback) {
+        const key = cellKey(sheet, cell);
+        return localCellValues.has(key) ? norm(localCellValues.get(key)) : norm(fallback);
+      }
 
-    function setActiveTab(tab) {
-      activeTab = tab;
-      viewTitleEl.textContent = TAB_CONFIG[tab].title;
+      function getCellValue(student, data) {
+        const col = data?.selected?.dateColumn?.a1Column;
+        if (!col) return "";
+        const sheet = data?.sheet || "Nomes";
+        const cell = studentCell(student, col);
+        return getValue(sheet, cell, student.currentValue);
+      }
 
-      const dpcIsActive = tab === 'dpc';
-      dpcView.classList.toggle('is-active', dpcIsActive);
-      agendaView.classList.toggle('is-active', !dpcIsActive);
+      function setLoadedStatus(data) {
+        let f = 0;
+        let one = 0;
+        let two = 0;
+        let three = 0;
+        for (const student of data.students || []) {
+          const current = getCellValue(student, data);
+          if (current === "F") f += 1;
+          if (current === "1") one += 1;
+          if (current === "2") two += 1;
+          if (current === "3") three += 1;
+        }
+        setStatus(`${(data.students || []).length} aluno(s) • F:${f} • 1:${one} • 2:${two} • 3:${three}`);
+      }
 
-      tabButtons.forEach((button) => {
-        const isActive = button.dataset.tab === tab;
-        button.classList.toggle('is-active', isActive);
-        button.setAttribute('aria-selected', String(isActive));
-      });
-    }
+      function renderInfo(data) {
+        const selected = data.selected || {};
+        const dateInfo = selected.dateColumn
+          ? `Nomes: data ${selected.date} na coluna ${selected.dateColumn.a1Column} (linha ${selected.dateHeaderRow})`
+          : `Nomes: data ${selected.date || ""} nao encontrada`;
+        const turmaInfo = selected.turmaRow
+          ? `Nomes: turma em ${selected.turmaCell}`
+          : "Nomes: turma nao encontrada";
 
-    async function loadData(force = false) {
-      statusEl.textContent = 'Carregando...';
-      reloadBtn.disabled = true;
+        sheetInfoEl.innerHTML = `<div><strong>${dateInfo}</strong></div><div>${turmaInfo}</div>`;
+      }
 
-      try {
-        if (!force && cache[activeTab]) {
-          renderByTab(activeTab, cache[activeTab]);
-          statusEl.textContent = 'Dados atualizados agora';
+      async function saveCell(sheet, cell, value) {
+        const response = await fetch("/api/chamada/marcar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sheet, cell, value })
+        });
+
+        let payload = null;
+        try {
+          payload = await response.json();
+        } catch (_error) {}
+
+        if (!response.ok) {
+          throw new Error((payload && (payload.details || payload.error)) || "Erro ao gravar");
+        }
+
+        return payload;
+      }
+
+      async function persistStudentCell({ sheet, cell, value, data, student, field }) {
+        const key = cellKey(sheet, cell);
+        if (savingCells.has(key)) return;
+
+        savingCells.add(key);
+        renderStudents(data);
+        setStatus(`Salvando ${sheet} ${cell}...`);
+
+        try {
+          await saveCell(sheet, cell, value);
+          localCellValues.set(key, value);
+          student[field] = value;
+        } catch (error) {
+          window.alert(`Nao foi possivel gravar ${cell} em ${sheet}: ${error.message}`);
+        } finally {
+          savingCells.delete(key);
+          renderStudents(data);
+          setLoadedStatus(data);
+        }
+      }
+
+      function toggleF(student, data) {
+        const col = data?.selected?.dateColumn?.a1Column;
+        if (!col) return;
+        const sheet = data.sheet || "Nomes";
+        const cell = studentCell(student, col);
+        const next = getCellValue(student, data) === "F" ? "" : "F";
+        return persistStudentCell({ sheet, cell, value: next, data, student, field: "currentValue" });
+      }
+
+      function setMarker(student, data, value) {
+        const col = data?.selected?.dateColumn?.a1Column;
+        if (!col) {
+          window.alert("Nao foi possivel localizar a data correspondente na aba Nomes.");
           return;
         }
 
-        const res = await fetch(TAB_CONFIG[activeTab].endpoint, { cache: 'no-store' });
-        if (!res.ok) throw new Error('Erro ao buscar dados');
-
-        const payload = await res.json();
-        const rows = Array.isArray(payload?.data) ? payload.data : [];
-        cache[activeTab] = rows;
-        renderByTab(activeTab, rows);
-        statusEl.textContent = 'Dados atualizados agora';
-      } catch (err) {
-        console.error(err);
-        renderByTab(activeTab, []);
-        statusEl.textContent = 'Falha ao carregar';
-      } finally {
-        reloadBtn.disabled = false;
-      }
-    }
-
-    function renderByTab(tab, rows) {
-      if (tab === 'agenda') {
-        renderAgenda(rows);
-      } else {
-        renderDpc(rows);
-      }
-    }
-
-    function normalizeRows(rows) {
-      return (rows || [])
-        .map((row) => ({
-          left: String(row?.[0] || '').trim(),
-          right: row.slice(1).join(',').trim()
-        }))
-        .filter((row) => row.left || row.right);
-    }
-
-    function buildLines(text) {
-      return String(text || '')
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean);
-    }
-
-    function renderDpc(rows) {
-      board.innerHTML = '';
-      const normalizedRows = normalizeRows(rows);
-
-      if (!normalizedRows.length) {
-        board.innerHTML = '<p class="empty">Nenhum dado retornado</p>';
-        return;
+        const sheet = data.sheet || "Nomes";
+        const cell = studentCell(student, col);
+        const next = getCellValue(student, data) === value ? "" : value;
+        return persistStudentCell({ sheet, cell, value: next, data, student, field: "currentValue" });
       }
 
-      const topRow = normalizedRows[0];
-      const topSection = document.createElement('section');
-      topSection.className = 'sheet-top';
-      topSection.innerHTML = `
-        <p class="sheet-top-label">Topo da aba</p>
-        <div class="sheet-top-value">${topRow.right || '-'}</div>
-      `;
-      board.appendChild(topSection);
+      function renderStudents(data) {
+        studentListEl.innerHTML = "";
 
-      const list = document.createElement('div');
-      list.className = 'sheet-list';
-
-      normalizedRows.slice(1).forEach((row) => {
-        const section = document.createElement('section');
-        section.className = 'sheet-row';
-
-        const title = document.createElement('div');
-        title.className = 'sheet-row-title';
-        title.textContent = row.left || 'Sem titulo';
-
-        const content = document.createElement('div');
-        content.className = 'sheet-row-content';
-
-        const lines = buildLines(row.right);
-
-        if (!lines.length) {
-          const emptyLine = document.createElement('p');
-          emptyLine.className = 'sheet-line is-empty';
-          emptyLine.textContent = 'Sem conteudo';
-          content.appendChild(emptyLine);
-        } else {
-          lines.forEach((line) => {
-            const paragraph = document.createElement('p');
-            paragraph.className = 'sheet-line';
-            paragraph.textContent = line;
-            content.appendChild(paragraph);
-          });
+        const col = data?.selected?.dateColumn?.a1Column;
+        if (!data?.selected?.turmaRow) {
+          const li = document.createElement("li");
+          li.className = "empty";
+          li.textContent = "Turma nao encontrada na aba Nomes.";
+          studentListEl.appendChild(li);
+          return;
         }
 
-        section.appendChild(title);
-        section.appendChild(content);
-        list.appendChild(section);
-      });
+        if (!col) {
+          const li = document.createElement("li");
+          li.className = "empty";
+          li.textContent = "Data nao encontrada na aba Nomes.";
+          studentListEl.appendChild(li);
+          return;
+        }
 
-      board.appendChild(list);
-    }
+        const students = data.students || [];
+        if (!students.length) {
+          const li = document.createElement("li");
+          li.className = "empty";
+          li.textContent = "Nenhum aluno encontrado para essa turma.";
+          studentListEl.appendChild(li);
+          return;
+        }
 
-    function normalizeAgendaRows(rows) {
-      const width = Math.max(1, ...(rows || []).map((row) => row.length));
-      return (rows || []).map((row) => {
-        return Array.from({ length: width }, (_unused, index) => String(row[index] || '').trim());
-      });
-    }
+        for (const [index, student] of students.entries()) {
+          const li = document.createElement("li");
+          li.className = "name-item student-item";
 
-    function renderAgenda(rows) {
-      const tbody = agendaTable.querySelector('tbody');
-      tbody.innerHTML = '';
+          const sheet = data.sheet || "Nomes";
+          const cell = studentCell(student, col);
+          const currentValue = getCellValue(student, data);
+          const saving = savingCells.has(cellKey(sheet, cell));
 
-      const matrix = normalizeAgendaRows(rows);
-      if (!matrix.length) {
-        tbody.innerHTML = '<tr><td class="empty">Nenhum dado retornado</td></tr>';
-        return;
+          li.innerHTML = `
+            <span class="index">${index + 1}</span>
+            <div class="student-main">
+              <span class="text"></span>
+              <small class="meta">Nomes ${cell}</small>
+            </div>
+            <div class="action-group">
+              <button type="button" class="f-btn ${currentValue === "F" ? "is-active" : ""}" ${saving ? "disabled" : ""}>${saving ? "Salvando..." : currentValue === "F" ? "Falta (F)" : "Marcar F"}</button>
+              <button type="button" class="num-btn ${currentValue === "1" ? "is-one" : ""}" ${saving ? "disabled" : ""}>1</button>
+              <button type="button" class="num-btn ${currentValue === "2" ? "is-two" : ""}" ${saving ? "disabled" : ""}>2</button>
+              <button type="button" class="num-btn ${currentValue === "3" ? "is-three" : ""}" ${saving ? "disabled" : ""}>3</button>
+            </div>
+          `;
+
+          li.querySelector(".text").textContent = student.name;
+          const [fBtn, oneBtn, twoBtn, threeBtn] = li.querySelectorAll("button");
+          fBtn.addEventListener("click", () => toggleF(student, data));
+          oneBtn.addEventListener("click", () => setMarker(student, data, "1"));
+          twoBtn.addEventListener("click", () => setMarker(student, data, "2"));
+          threeBtn.addEventListener("click", () => setMarker(student, data, "3"));
+          studentListEl.appendChild(li);
+        }
       }
 
-      matrix.forEach((row, rowIndex) => {
-        const tr = document.createElement('tr');
+      function syncFilters(data) {
+        latestMeta = data;
 
-        row.forEach((cell) => {
-          const td = document.createElement('td');
-          td.textContent = cell;
-
-          if (rowIndex === 0 && cell) {
-            td.classList.add('agenda-month');
-          } else if (/^\d{1,2}$/.test(cell)) {
-            td.classList.add('agenda-day');
-          } else if (cell) {
-            td.classList.add('agenda-text');
-          }
-
-          tr.appendChild(td);
+        turmaSelectEl.innerHTML = "";
+        (data.turmaOptions || []).forEach((turma) => {
+          const option = document.createElement("option");
+          option.value = turma;
+          option.textContent = turma;
+          turmaSelectEl.appendChild(option);
         });
 
-        tbody.appendChild(tr);
+        if (!dateInputEl.value) dateInputEl.value = data.todaySuggestion || "";
+        if (data.selected?.turma) turmaSelectEl.value = data.selected.turma;
+      }
+
+      async function loadChamada() {
+        loadBtnEl.disabled = true;
+        setStatus("Carregando...");
+        sheetInfoEl.textContent = "Consultando planilha...";
+
+        const params = new URLSearchParams();
+        if (dateInputEl.value.trim()) params.set("date", dateInputEl.value.trim());
+        if (turmaSelectEl.value.trim()) params.set("turma", turmaSelectEl.value.trim());
+
+        try {
+          const response = await fetch(`/api/chamada?${params.toString()}`, { cache: "no-store" });
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.details || data.error || "Erro ao carregar chamada");
+          }
+
+          syncFilters(data);
+          renderInfo(data);
+          renderStudents(data);
+          setLoadedStatus(data);
+        } catch (error) {
+          studentListEl.innerHTML = "";
+          const li = document.createElement("li");
+          li.className = "empty";
+          li.textContent = error.message;
+          studentListEl.appendChild(li);
+          sheetInfoEl.innerHTML = `<div class="warn">${error.message}</div>`;
+          setStatus("Erro ao carregar");
+        } finally {
+          loadBtnEl.disabled = false;
+        }
+      }
+
+      function fillAnoOptions(anos, selectedAno) {
+        listaAnoSelectEl.innerHTML = "";
+        (anos || []).forEach((ano) => {
+          const option = document.createElement("option");
+          option.value = ano;
+          option.textContent = ano;
+          listaAnoSelectEl.appendChild(option);
+        });
+
+        if (selectedAno && (anos || []).includes(selectedAno)) {
+          listaAnoSelectEl.value = selectedAno;
+        } else if ((anos || []).length > 0) {
+          listaAnoSelectEl.value = anos[0];
+        }
+      }
+
+      function syncListaFilters(data) {
+        latestListaMeta = data;
+        const listas = data?.options?.listas || [];
+
+        listaNomeSelectEl.innerHTML = "";
+        listas.forEach((lista) => {
+          const option = document.createElement("option");
+          option.value = lista;
+          option.textContent = lista;
+          listaNomeSelectEl.appendChild(option);
+        });
+
+        const selectedLista = data?.selected?.lista || listas[0] || "";
+        listaNomeSelectEl.value = selectedLista;
+
+        const anos = data?.options?.anosByLista?.[selectedLista] || [];
+        fillAnoOptions(anos, data?.selected?.ano || "");
+      }
+
+      function renderListaInfo(data) {
+        const selected = data.selected || {};
+        const linkCount = (data.items || []).filter((item) => item.hasLink).length;
+        const total = (data.items || []).length;
+        const source = data.source === "google_sheets_api" ? "Google Sheets API" : "GViz CSV";
+
+        let html = `<div><strong>${data.sheet}: ${data.range}</strong></div>`;
+        html += `<div>${selected.lista || "-"} • ${selected.ano || "-"} • ${total} numero(s) • ${linkCount} link(s)</div>`;
+        html += `<div>Fonte: ${source}</div>`;
+        if (data.warning) {
+          html += `<div class="warn">${data.warning}</div>`;
+        }
+
+        listaInfoEl.innerHTML = html;
+      }
+
+      function renderListaItems(data) {
+        listaItemsEl.innerHTML = "";
+        const items = data.items || [];
+
+        if (!items.length) {
+          const li = document.createElement("li");
+          li.className = "empty";
+          li.textContent = "Nenhum numero encontrado para essa combinacao.";
+          listaItemsEl.appendChild(li);
+          return;
+        }
+
+        for (const [index, item] of items.entries()) {
+          const li = document.createElement("li");
+          li.className = "name-item lista-item";
+
+          const idx = document.createElement("span");
+          idx.className = "index";
+          idx.textContent = `${index + 1}`;
+
+          const content = document.createElement("div");
+          content.className = "student-main";
+
+          const title = document.createElement("span");
+          title.className = "text";
+          title.textContent = `Numero ${item.numero}`;
+
+          const meta = document.createElement("small");
+          meta.className = "meta";
+          meta.textContent = `${data.selected?.lista || "Lista"} • ${data.selected?.ano || "Ano"} • ${item.cell || ""}`;
+
+          content.append(title, meta);
+
+          let actionEl;
+          if (item.hasLink && item.link) {
+            actionEl = document.createElement("a");
+            actionEl.className = "link-btn";
+            actionEl.href = item.link;
+            actionEl.target = "_blank";
+            actionEl.rel = "noopener noreferrer";
+            actionEl.textContent = "Abrir link";
+          } else {
+            actionEl = document.createElement("button");
+            actionEl.className = "link-btn is-disabled";
+            actionEl.type = "button";
+            actionEl.disabled = true;
+            actionEl.textContent = "Sem link";
+          }
+
+          li.append(idx, content, actionEl);
+          listaItemsEl.appendChild(li);
+        }
+      }
+
+      function setListaLoadedStatus(data) {
+        const items = data.items || [];
+        const links = items.filter((item) => item.hasLink).length;
+        setListaStatus(`${items.length} numero(s) • ${links} link(s)`);
+      }
+
+      async function loadLista() {
+        listaLoadBtnEl.disabled = true;
+        setListaStatus("Carregando...");
+        listaInfoEl.textContent = "Consultando aba Lista...";
+
+        const params = new URLSearchParams();
+        if (listaNomeSelectEl.value.trim()) params.set("lista", listaNomeSelectEl.value.trim());
+        if (listaAnoSelectEl.value.trim()) params.set("ano", listaAnoSelectEl.value.trim());
+
+        try {
+          const response = await fetch(`/api/lista?${params.toString()}`, { cache: "no-store" });
+          const data = await response.json();
+          if (!response.ok) {
+            throw new Error(data.details || data.error || "Erro ao carregar lista");
+          }
+
+          syncListaFilters(data);
+          renderListaInfo(data);
+          renderListaItems(data);
+          setListaLoadedStatus(data);
+        } catch (error) {
+          listaItemsEl.innerHTML = "";
+          const li = document.createElement("li");
+          li.className = "empty";
+          li.textContent = error.message;
+          listaItemsEl.appendChild(li);
+          listaInfoEl.innerHTML = `<div class="warn">${error.message}</div>`;
+          setListaStatus("Erro ao carregar");
+        } finally {
+          listaLoadBtnEl.disabled = false;
+        }
+      }
+
+      formEl.addEventListener("submit", (event) => {
+        event.preventDefault();
+        loadChamada();
       });
-    }
 
-    tabButtons.forEach((button) => {
-      button.addEventListener('click', () => {
-        const nextTab = button.dataset.tab;
-        if (!TAB_CONFIG[nextTab] || nextTab === activeTab) return;
-        setActiveTab(nextTab);
-        loadData();
+      listaFormEl.addEventListener("submit", (event) => {
+        event.preventDefault();
+        loadLista();
       });
-    });
 
-    reloadBtn.addEventListener('click', () => loadData(true));
+      listaNomeSelectEl.addEventListener("change", () => {
+        const anosByLista = latestListaMeta?.options?.anosByLista || {};
+        const anos = anosByLista[listaNomeSelectEl.value] || [];
+        fillAnoOptions(anos, "");
+      });
 
-    setActiveTab('dpc');
-    loadData();
-  </script>
-</body>
+      (async function init() {
+        await Promise.all([loadChamada(), loadLista()]);
+
+        if (!turmaSelectEl.value && latestMeta?.turmaOptions?.length) {
+          turmaSelectEl.value = latestMeta.turmaOptions[0];
+        }
+
+        setActiveTab("chamada");
+      })();
+    </script>
+  </body>
 </html>
