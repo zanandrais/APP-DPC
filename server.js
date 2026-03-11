@@ -1,5 +1,6 @@
 const path = require('path');
 const express = require('express');
+const { google } = require('googleapis');
 const XLSX = require('xlsx');
 
 const app = express();
@@ -13,10 +14,15 @@ const SHEET_ID =
 const SHEET_NAME = process.env.SHEET_NAME || 'DPC';
 const SHEET_GID = process.env.SHEET_GID || '';
 const LISTA_SHEET_NAME = process.env.SHEET_LISTA_NAME || 'Lista';
+const LISTA_COL_START = process.env.SHEET_LISTA_COL_START || 'R';
+const LISTA_COL_END = process.env.SHEET_LISTA_COL_END || 'AZ';
+const GOOGLE_SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID || DEFAULT_SPREADSHEET_ID;
+const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '';
+const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY || '';
 
 const RANGE_DPC = 'A1:B5';
 const RANGE_AGENDA = 'F5:T43';
-const RANGE_LISTA = 'R:AZ';
+const RANGE_LISTA = `${LISTA_COL_START}:${LISTA_COL_END}`;
 const LISTA_LINK_CACHE_TTL_MS = Number(process.env.LISTA_LINK_CACHE_TTL_MS || 5 * 60 * 1000);
 
 const listaLinkCache = {
@@ -211,6 +217,459 @@ function getRangeColumns(range) {
   return {
     start: toColIndex(match[1]),
     end: toColIndex(match[2])
+  };
+}
+
+function fromA1Column(colLabel) {
+  const value = String(colLabel || '').trim().toUpperCase();
+  if (!/^[A-Z]+$/.test(value)) return -1;
+
+  let total = 0;
+  for (const char of value) {
+    total = total * 26 + (char.charCodeAt(0) - 64);
+  }
+
+  return total - 1;
+}
+
+function getListaColumnBounds() {
+  const startCol = fromA1Column(LISTA_COL_START);
+  const endCol = fromA1Column(LISTA_COL_END);
+
+  if (startCol < 0 || endCol < 0) {
+    return {
+      startColIndex: fromA1Column('R'),
+      endColIndex: fromA1Column('AZ'),
+      startColLabel: 'R',
+      endColLabel: 'AZ'
+    };
+  }
+
+  const minCol = Math.min(startCol, endCol);
+  const maxCol = Math.max(startCol, endCol);
+
+  return {
+    startColIndex: minCol,
+    endColIndex: maxCol,
+    startColLabel: toA1Column(minCol),
+    endColLabel: toA1Column(maxCol)
+  };
+}
+
+function getSheetsClient() {
+  if (!GOOGLE_SERVICE_ACCOUNT_EMAIL || !GOOGLE_PRIVATE_KEY || !GOOGLE_SPREADSHEET_ID) {
+    throw new Error(
+      'Credenciais do Google Sheets nao configuradas. Configure GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_PRIVATE_KEY e GOOGLE_SPREADSHEET_ID.'
+    );
+  }
+
+  const auth = new google.auth.JWT(
+    GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    null,
+    GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+    ['https://www.googleapis.com/auth/spreadsheets']
+  );
+
+  return google.sheets({ version: 'v4', auth });
+}
+
+function normalizeListaCellText(cell) {
+  const formatted = String(cell?.formattedValue || '').trim();
+  if (formatted) return formatted;
+
+  if (cell?.effectiveValue?.stringValue != null) {
+    return String(cell.effectiveValue.stringValue).trim();
+  }
+
+  if (cell?.effectiveValue?.numberValue != null) {
+    return String(cell.effectiveValue.numberValue).trim();
+  }
+
+  if (cell?.effectiveValue?.boolValue != null) {
+    return cell.effectiveValue.boolValue ? 'TRUE' : 'FALSE';
+  }
+
+  if (cell?.userEnteredValue?.stringValue != null) {
+    return String(cell.userEnteredValue.stringValue).trim();
+  }
+
+  if (cell?.userEnteredValue?.numberValue != null) {
+    return String(cell.userEnteredValue.numberValue).trim();
+  }
+
+  return '';
+}
+
+function extractHyperlinkFromFormula(formulaValue) {
+  const formula = String(formulaValue || '').trim();
+  if (!formula) return '';
+
+  const directMatch = formula.match(/HYPERLINK\s*\(\s*"([^"]+)"/i);
+  if (!directMatch) return '';
+
+  return String(directMatch[1] || '').trim();
+}
+
+function normalizeListaHyperlink(link) {
+  const text = String(link || '').trim();
+  if (!text) return '';
+  if (/^https?:\/\//i.test(text)) return text;
+  if (/^www\./i.test(text)) return `https://${text}`;
+  return '';
+}
+
+function extractListaCellLink(cell) {
+  const direct = normalizeListaHyperlink(cell?.hyperlink);
+  if (direct) return direct;
+
+  const richTextLink = normalizeListaHyperlink(
+    cell?.userEnteredFormat?.textFormat?.link?.uri || cell?.effectiveFormat?.textFormat?.link?.uri
+  );
+  if (richTextLink) return richTextLink;
+
+  if (Array.isArray(cell?.textFormatRuns)) {
+    for (const run of cell.textFormatRuns) {
+      const link = normalizeListaHyperlink(run?.format?.link?.uri);
+      if (link) return link;
+    }
+  }
+
+  return normalizeListaHyperlink(extractHyperlinkFromFormula(cell?.userEnteredValue?.formulaValue));
+}
+
+async function fetchListaCellsBySheetsApi() {
+  const sheets = getSheetsClient();
+  const bounds = getListaColumnBounds();
+  const a1Range = `'${LISTA_SHEET_NAME}'!${bounds.startColLabel}:${bounds.endColLabel}`;
+
+  const response = await sheets.spreadsheets.get({
+    spreadsheetId: GOOGLE_SPREADSHEET_ID,
+    includeGridData: true,
+    ranges: [a1Range]
+  });
+
+  const grid = response?.data?.sheets?.[0]?.data?.[0];
+  const rowData = Array.isArray(grid?.rowData) ? grid.rowData : [];
+  const startRow = Number(grid?.startRow || 0);
+  const startCol = Number(grid?.startColumn ?? bounds.startColIndex);
+
+  const cells = [];
+  let linkCount = 0;
+
+  for (let rowOffset = 0; rowOffset < rowData.length; rowOffset += 1) {
+    const values = Array.isArray(rowData[rowOffset]?.values) ? rowData[rowOffset].values : [];
+
+    for (let colOffset = 0; colOffset < values.length; colOffset += 1) {
+      const cell = values[colOffset];
+      const text = normalizeListaCellText(cell);
+      const link = extractListaCellLink(cell);
+
+      if (!text && !link) continue;
+
+      const absoluteCol = startCol + colOffset;
+      if (absoluteCol < bounds.startColIndex || absoluteCol > bounds.endColIndex) continue;
+
+      const absoluteRow = startRow + rowOffset;
+      if (link) linkCount += 1;
+
+      cells.push({
+        row: absoluteRow + 1,
+        col: absoluteCol + 1,
+        a1: `${toA1Column(absoluteCol)}${absoluteRow + 1}`,
+        text,
+        link
+      });
+    }
+  }
+
+  return {
+    cells,
+    source: 'google_sheets_api',
+    sourceUrl: a1Range,
+    linkCount
+  };
+}
+
+async function fetchListaCellsByGviz() {
+  const bounds = getListaColumnBounds();
+  const payload = await fetchSheet(`${bounds.startColLabel}:${bounds.endColLabel}`, {
+    sheetName: LISTA_SHEET_NAME,
+    allowGid: false
+  });
+
+  const rows = payload.rows || [];
+  const cells = [];
+
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const row = Array.isArray(rows[rowIndex]) ? rows[rowIndex] : [];
+    for (let colOffset = 0; colOffset < row.length; colOffset += 1) {
+      const text = String(row[colOffset] || '').trim();
+      if (!text) continue;
+
+      const absoluteCol = bounds.startColIndex + colOffset;
+      const absoluteRow = rowIndex;
+
+      cells.push({
+        row: absoluteRow + 1,
+        col: absoluteCol + 1,
+        a1: `${toA1Column(absoluteCol)}${absoluteRow + 1}`,
+        text,
+        link: ''
+      });
+    }
+  }
+
+  return {
+    cells,
+    source: 'gviz_csv',
+    sourceUrl: payload.sourceUrl,
+    linkCount: 0
+  };
+}
+
+function isExerciseNumber(text) {
+  return /^\d+$/.test(String(text || '').trim());
+}
+
+function isListaYearLabel(text) {
+  const normalized = normalizeText(text);
+  return /^\d{1,2}\s*(ano|anos|serie|series)\b/.test(normalized);
+}
+
+function isListaTitle(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  if (isExerciseNumber(raw)) return false;
+  if (isListaYearLabel(raw)) return false;
+
+  const normalized = normalizeText(raw);
+  if (!/[a-z]/.test(normalized)) return false;
+  if (normalized === 'gabaritos') return false;
+  return true;
+}
+
+function pickAnchor(anchors, target, options = {}) {
+  const maxRowDistance = Number(options.maxRowDistance ?? 22);
+  const maxColDistance = Number(options.maxColDistance ?? 20);
+  const weightRow = Number(options.weightRow ?? 3);
+  const weightCol = Number(options.weightCol ?? 1);
+  const minCol = Number.isFinite(options.minCol) ? options.minCol : null;
+  const maxCol = Number.isFinite(options.maxCol) ? options.maxCol : null;
+  const minRow = Number.isFinite(options.minRow) ? options.minRow : null;
+
+  let best = null;
+
+  for (const anchor of anchors) {
+    if (!anchor) continue;
+    if (anchor.row > target.row || anchor.col > target.col) continue;
+
+    if (minCol != null && anchor.col < minCol) continue;
+    if (maxCol != null && anchor.col > maxCol) continue;
+    if (minRow != null && anchor.row < minRow) continue;
+
+    const rowDistance = target.row - anchor.row;
+    const colDistance = target.col - anchor.col;
+    if (rowDistance > maxRowDistance || colDistance > maxColDistance) continue;
+
+    const score = rowDistance * weightRow + colDistance * weightCol;
+    if (
+      !best ||
+      score < best.score ||
+      (score === best.score && rowDistance < best.rowDistance) ||
+      (score === best.score &&
+        rowDistance === best.rowDistance &&
+        colDistance < best.colDistance)
+    ) {
+      best = { anchor, score, rowDistance, colDistance };
+    }
+  }
+
+  return best ? best.anchor : null;
+}
+
+function resolveYearAnchor(yearAnchors, listAnchor, target) {
+  const preferred = pickAnchor(yearAnchors, target, {
+    maxRowDistance: 28,
+    maxColDistance: 8,
+    weightRow: 4,
+    weightCol: 1,
+    minCol: listAnchor ? listAnchor.col - 1 : null,
+    maxCol: listAnchor ? listAnchor.col + 4 : null,
+    minRow: listAnchor ? listAnchor.row : null
+  });
+
+  if (preferred) return preferred;
+
+  return pickAnchor(yearAnchors, target, {
+    maxRowDistance: 28,
+    maxColDistance: 20,
+    weightRow: 4,
+    weightCol: 1,
+    minRow: listAnchor ? listAnchor.row : null
+  });
+}
+
+function buildListaCatalogFromCells(cells) {
+  const sortedCells = [...(cells || [])].sort((a, b) => a.row - b.row || a.col - b.col);
+
+  const listAnchors = sortedCells.filter((cell) => isListaTitle(cell.text));
+  const yearAnchors = sortedCells.filter((cell) => isListaYearLabel(cell.text));
+  const numberCells = sortedCells.filter((cell) => isExerciseNumber(cell.text));
+
+  const groups = new Map();
+
+  for (const cell of numberCells) {
+    const listAnchor = pickAnchor(listAnchors, cell, {
+      maxRowDistance: 30,
+      maxColDistance: 20,
+      weightRow: 3,
+      weightCol: 1
+    });
+    if (!listAnchor) continue;
+
+    const yearAnchor = resolveYearAnchor(yearAnchors, listAnchor, cell);
+    const listName = String(listAnchor.text || '').trim();
+    const yearName = String(yearAnchor?.text || 'Sem ano').trim();
+    const key = `${normalizeText(listName)}||${normalizeText(yearName)}`;
+
+    if (!groups.has(key)) {
+      groups.set(key, {
+        lista: listName,
+        ano: yearName,
+        firstRow: listAnchor.row,
+        firstCol: listAnchor.col,
+        items: []
+      });
+    }
+
+    groups.get(key).items.push({
+      numero: String(cell.text || '').trim(),
+      link: String(cell.link || '').trim(),
+      hasLink: Boolean(String(cell.link || '').trim()),
+      cell: cell.a1,
+      row: cell.row,
+      col: cell.col
+    });
+  }
+
+  const combinations = Array.from(groups.values())
+    .map((group) => {
+      const uniqueByCell = new Map();
+      for (const item of group.items) uniqueByCell.set(item.cell, item);
+
+      const sortedItems = Array.from(uniqueByCell.values())
+        .sort((a, b) => {
+          const aNum = Number(a.numero);
+          const bNum = Number(b.numero);
+          if (Number.isFinite(aNum) && Number.isFinite(bNum) && aNum !== bNum) return aNum - bNum;
+          return a.row - b.row || a.col - b.col;
+        })
+        .map(({ row, col, ...rest }) => rest);
+
+      return {
+        lista: group.lista,
+        ano: group.ano,
+        total: sortedItems.length,
+        withLink: sortedItems.filter((item) => item.hasLink).length,
+        firstRow: group.firstRow,
+        firstCol: group.firstCol,
+        items: sortedItems
+      };
+    })
+    .sort(
+      (a, b) =>
+        a.firstRow - b.firstRow || a.firstCol - b.firstCol || a.lista.localeCompare(b.lista, 'pt-BR')
+    );
+
+  const listas = [];
+  const anosByLista = {};
+
+  for (const combo of combinations) {
+    if (!listas.includes(combo.lista)) {
+      listas.push(combo.lista);
+      anosByLista[combo.lista] = [];
+    }
+    if (!anosByLista[combo.lista].includes(combo.ano)) {
+      anosByLista[combo.lista].push(combo.ano);
+    }
+  }
+
+  return { listas, anosByLista, combinations };
+}
+
+function selectListaCombination(combinations, selectedList, selectedYear) {
+  if (!Array.isArray(combinations) || combinations.length === 0) return null;
+
+  const listKey = normalizeText(selectedList);
+  const yearKey = normalizeText(selectedYear);
+
+  if (listKey && yearKey) {
+    const exact = combinations.find(
+      (combo) => normalizeText(combo.lista) === listKey && normalizeText(combo.ano) === yearKey
+    );
+    if (exact) return exact;
+  }
+
+  if (listKey) {
+    const byList = combinations.find((combo) => normalizeText(combo.lista) === listKey);
+    if (byList) return byList;
+  }
+
+  return combinations[0];
+}
+
+async function fetchListaData(selectedList, selectedYear) {
+  const bounds = getListaColumnBounds();
+  const range = `${bounds.startColLabel}:${bounds.endColLabel}`;
+
+  let sourcePayload;
+  let warning = '';
+
+  try {
+    sourcePayload = await fetchListaCellsBySheetsApi();
+  } catch (apiError) {
+    sourcePayload = await fetchListaCellsByGviz();
+    warning =
+      'Links indisponiveis sem credenciais do Google Sheets. Configure as variaveis de servico no Render.';
+    if (apiError?.message) {
+      warning += ` (${apiError.message})`;
+    }
+  }
+
+  const catalog = buildListaCatalogFromCells(sourcePayload.cells);
+  if (!catalog.combinations.length) {
+    throw new Error(`Nenhuma lista encontrada no intervalo ${LISTA_SHEET_NAME}!${range}.`);
+  }
+
+  const selected = selectListaCombination(catalog.combinations, selectedList, selectedYear);
+  if (!selected) {
+    throw new Error('Nao foi possivel determinar a lista selecionada.');
+  }
+
+  const combinationsMeta = catalog.combinations.map(({ items, firstRow, firstCol, ...meta }) => meta);
+  const hasAnyLink = combinationsMeta.some((combo) => combo.withLink > 0);
+
+  if (!hasAnyLink && !warning) {
+    warning = 'Nenhum hyperlink foi encontrado nas celulas desse intervalo.';
+  }
+
+  return {
+    sheet: LISTA_SHEET_NAME,
+    range,
+    source: sourcePayload.source,
+    sourceUrl: sourcePayload.sourceUrl,
+    warning,
+    options: {
+      listas: catalog.listas,
+      anosByLista: catalog.anosByLista,
+      combinacoes: combinationsMeta
+    },
+    selected: {
+      lista: selected.lista,
+      ano: selected.ano
+    },
+    items: selected.items,
+    updatedAt: new Date().toISOString()
   };
 }
 
@@ -777,63 +1236,8 @@ app.get('/api/agenda', async (_req, res) => {
 
 app.get('/api/lista', async (req, res) => {
   try {
-    const payload = await fetchSheet(RANGE_LISTA, {
-      sheetName: LISTA_SHEET_NAME,
-      allowGid: false
-    });
-
-    const catalog = buildListaCatalog(payload.rows, RANGE_LISTA);
-    const selected = selectCombination(catalog.combinations, req.query.lista, req.query.ano);
-
-    if (!selected) {
-      return res.status(404).json({
-        error: `Nenhuma lista encontrada em ${LISTA_SHEET_NAME}!${RANGE_LISTA}.`
-      });
-    }
-
-    let linksWarning = '';
-    let linkSourceUrl = '';
-    let linkMap = {};
-
-    try {
-      const linkPayload = await fetchListaLinkMapFromXlsx();
-      linkMap = linkPayload.map || {};
-      linkSourceUrl = linkPayload.sourceUrl || '';
-    } catch (error) {
-      linksWarning = `Nao foi possivel carregar hyperlinks automaticamente (${error.message}).`;
-    }
-
-    const items = (selected.items || []).map((item) => {
-      const link = String(linkMap[String(item.cell || '').toUpperCase()] || '').trim();
-      return {
-        ...item,
-        link,
-        hasLink: Boolean(link)
-      };
-    });
-
-    const withLinkCount = items.filter((item) => item.hasLink).length;
-    if (!linksWarning && withLinkCount === 0) {
-      linksWarning = 'Nenhum hyperlink encontrado para as celulas selecionadas.';
-    }
-
-    res.json({
-      sheet: LISTA_SHEET_NAME,
-      range: RANGE_LISTA,
-      source: 'gviz_csv + xlsx_export',
-      sourceUrl: payload.sourceUrl,
-      linkSourceUrl,
-      warning: linksWarning,
-      options: {
-        listas: catalog.listas,
-        anosByLista: catalog.anosByLista
-      },
-      selected: {
-        lista: selected.lista,
-        ano: selected.ano
-      },
-      items
-    });
+    const data = await fetchListaData(req.query.lista, req.query.ano);
+    res.json(data);
   } catch (err) {
     console.error('[api/lista] error:', err);
     res.status(500).json({ error: 'Falha ao buscar dados da aba Lista', detail: err.message });

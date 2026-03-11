@@ -26,6 +26,11 @@ Acesse `http://localhost:3000`.
 - `SHEET_NAME` (padrao: `DPC`)
 - `SHEET_GID` (opcional, para a aba `DPC`)
 - `SHEET_LISTA_NAME` (padrao: `Lista`)
+- `SHEET_LISTA_COL_START` (padrao: `R`)
+- `SHEET_LISTA_COL_END` (padrao: `AZ`)
+- `GOOGLE_SPREADSHEET_ID` (id direto `/d/...`, padrao do projeto)
+- `GOOGLE_SERVICE_ACCOUNT_EMAIL` (obrigatorio para extrair links via API)
+- `GOOGLE_PRIVATE_KEY` (obrigatorio para extrair links via API)
 
 ## Endpoints
 
