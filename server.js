@@ -261,7 +261,7 @@ function splitFormulaArgs(text) {
       continue;
     }
 
-    if (ch === ',' && depth === 0) {
+    if ((ch === ',' || ch === ';') && depth === 0) {
       args.push(current.trim());
       current = '';
       continue;
@@ -362,8 +362,9 @@ function getWorkbookCellText(workbook, sheetName, cellA1) {
   if (!cell) return '';
 
   if (typeof cell.w === 'string' && cell.w.trim()) return cell.w.trim();
-  if (cell.v == null) return '';
-  return String(cell.v).trim();
+  if (cell.v != null) return String(cell.v).trim();
+  if (cell.f) return evalFormulaText(cell.f, workbook, sheetName, 1).trim();
+  return '';
 }
 
 function evalFormulaNumber(expr, workbook, defaultSheetName) {
@@ -384,7 +385,7 @@ function evalFormulaNumber(expr, workbook, defaultSheetName) {
 
 function evalFormulaText(expr, workbook, defaultSheetName, depth = 0) {
   if (depth > 8) return '';
-  const text = String(expr || '').trim();
+  const text = String(expr || '').trim().replace(/^=/, '');
   if (!text) return '';
 
   if (text.startsWith('"') && text.endsWith('"') && text.length >= 2) {
@@ -398,7 +399,7 @@ function evalFormulaText(expr, workbook, defaultSheetName, depth = 0) {
       .join('');
   }
 
-  const midMatch = text.match(/^MID\(([\s\S]*)\)$/i);
+  const midMatch = text.match(/^(?:MID|EXT\.?TEXTO)\(([\s\S]*)\)$/i);
   if (midMatch) {
     const args = splitFormulaArgs(midMatch[1]);
     if (args.length >= 3) {
@@ -426,17 +427,75 @@ function extractLinkFromFormula(formula, workbook, sheetName) {
   const raw = String(formula || '').trim().replace(/^=/, '');
   if (!raw) return '';
 
-  const match = raw.match(/^HYPERLINK\(([\s\S]*)\)$/i);
-  if (!match) return '';
+  const upper = raw.toUpperCase();
+  const fnNames = ['HYPERLINK', 'HIPERLINK'];
+  let argsText = '';
 
-  const args = splitFormulaArgs(match[1]);
+  outer: for (let i = 0; i < raw.length; i += 1) {
+    for (const fnName of fnNames) {
+      if (!upper.startsWith(fnName, i)) continue;
+
+      const prevChar = i > 0 ? upper[i - 1] : '';
+      if (/[A-Z0-9_.]/.test(prevChar)) continue;
+
+      let openAt = i + fnName.length;
+      while (raw[openAt] === ' ' || raw[openAt] === '\t') openAt += 1;
+      if (raw[openAt] !== '(') continue;
+
+      let depth = 0;
+      let inString = false;
+      for (let j = openAt; j < raw.length; j += 1) {
+        const ch = raw[j];
+        const next = raw[j + 1];
+
+        if (inString) {
+          if (ch === '"' && next === '"') {
+            j += 1;
+          } else if (ch === '"') {
+            inString = false;
+          }
+          continue;
+        }
+
+        if (ch === '"') {
+          inString = true;
+          continue;
+        }
+
+        if (ch === '(') {
+          depth += 1;
+          continue;
+        }
+
+        if (ch === ')') {
+          depth -= 1;
+          if (depth === 0) {
+            argsText = raw.slice(openAt + 1, j);
+            break outer;
+          }
+        }
+      }
+    }
+  }
+
+  if (!argsText) {
+    const directInFormula = raw.match(/https?:\/\/[^\s)"',;]+/i);
+    return directInFormula ? normalizeUrl(directInFormula[0]) : '';
+  }
+
+  const args = splitFormulaArgs(argsText);
   if (!args.length) return '';
 
   const resolved = evalFormulaText(args[0], workbook, sheetName);
   const normalized = normalizeUrl(resolved);
   if (normalized) return normalized;
 
-  const directInFormula = raw.match(/https?:\/\/[^\s)",]+/i);
+  const directInArg = String(args[0] || '').match(/https?:\/\/[^\s)"',;]+/i);
+  if (directInArg) {
+    return normalizeUrl(directInArg[0]);
+  }
+
+  const directInFormula = raw.match(/https?:\/\/[^\s)"',;]+/i);
   return directInFormula ? normalizeUrl(directInFormula[0]) : '';
 }
 
