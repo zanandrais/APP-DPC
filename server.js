@@ -50,7 +50,7 @@ function csvUrl(range, options = {}, sheetId = SHEET_ID) {
 
   return (
     `${base}/gviz/tq` +
-    `?tqx=out:csv&sheet=${encodeURIComponent(sheet)}&range=${encodeURIComponent(range)}`
+    `?tqx=out:csv&headers=0&sheet=${encodeURIComponent(sheet)}&range=${encodeURIComponent(range)}`
   );
 }
 
