@@ -4,9 +4,11 @@ const express = require('express');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const DEFAULT_SPREADSHEET_ID = '1spXWVi4VD1wIkGVXMVdcLpm9dHAgCJ5CTCBgmpiUji8';
 const SHEET_ID =
   process.env.SHEET_ID ||
-  '2PACX-1vQL2uV2BS5DCGOI0Qx4X2A7ABEWgC-c3CYA46B3S92pUG5H8VhFXta7qL00F3XjdqolkZ9jEPIqrp3Q';
+  process.env.GOOGLE_SPREADSHEET_ID ||
+  DEFAULT_SPREADSHEET_ID;
 const SHEET_NAME = process.env.SHEET_NAME || 'DPC';
 const SHEET_GID = process.env.SHEET_GID || '';
 const LISTA_SHEET_NAME = process.env.SHEET_LISTA_NAME || 'Lista';
@@ -21,20 +23,33 @@ const fetchFn =
     ? fetch
     : (...args) => import('node-fetch').then(({ default: fetch }) => fetch(...args));
 
-function csvUrl(range, options = {}) {
+function buildSheetBaseUrl(sheetId) {
+  const id = String(sheetId || '').trim();
+  if (!id) return '';
+
+  if (id.startsWith('2PACX-')) {
+    return `https://docs.google.com/spreadsheets/d/e/${id}`;
+  }
+
+  return `https://docs.google.com/spreadsheets/d/${id}`;
+}
+
+function csvUrl(range, options = {}, sheetId = SHEET_ID) {
   const sheet = options.sheetName || SHEET_NAME;
   const allowGid = options.allowGid !== false;
+  const base = buildSheetBaseUrl(sheetId);
+  if (!base) return '';
 
   if (allowGid && SHEET_GID && sheet === SHEET_NAME) {
     return (
-      `https://docs.google.com/spreadsheets/d/e/${SHEET_ID}/pub` +
+      `${base}/pub` +
       `?gid=${encodeURIComponent(SHEET_GID)}` +
       `&single=true&output=csv&range=${encodeURIComponent(range)}`
     );
   }
 
   return (
-    `https://docs.google.com/spreadsheets/d/e/${SHEET_ID}/gviz/tq` +
+    `${base}/gviz/tq` +
     `?tqx=out:csv&sheet=${encodeURIComponent(sheet)}&range=${encodeURIComponent(range)}`
   );
 }
@@ -108,15 +123,32 @@ function parseCsv(csvText) {
 }
 
 async function fetchSheet(range, options = {}) {
-  const url = csvUrl(range, options);
-  const res = await fetchFn(url);
-  const csv = await res.text();
+  const tried = new Set();
+  const candidateIds = [
+    SHEET_ID,
+    process.env.GOOGLE_SPREADSHEET_ID || '',
+    DEFAULT_SPREADSHEET_ID
+  ]
+    .map((value) => String(value || '').trim())
+    .filter((value) => value && !tried.has(value) && tried.add(value));
 
-  if (!res.ok) {
-    throw new Error(`Google Sheets returned ${res.status} - ${csv.slice(0, 300)}`);
+  let lastError = new Error('No sheet id configured.');
+
+  for (const candidateId of candidateIds) {
+    const url = csvUrl(range, options, candidateId);
+    if (!url) continue;
+
+    const res = await fetchFn(url);
+    const csv = await res.text();
+
+    if (res.ok) {
+      return { rows: parseCsv(csv), sourceUrl: url, sheetId: candidateId };
+    }
+
+    lastError = new Error(`Google Sheets returned ${res.status} - ${csv.slice(0, 300)}`);
   }
 
-  return { rows: parseCsv(csv), sourceUrl: url };
+  throw lastError;
 }
 
 function normalizeText(value) {
