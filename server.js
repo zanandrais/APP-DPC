@@ -1,5 +1,6 @@
 const path = require('path');
 const express = require('express');
+const XLSX = require('xlsx');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,6 +17,13 @@ const LISTA_SHEET_NAME = process.env.SHEET_LISTA_NAME || 'Lista';
 const RANGE_DPC = 'A1:B5';
 const RANGE_AGENDA = 'F5:T43';
 const RANGE_LISTA = 'R:AZ';
+const LISTA_LINK_CACHE_TTL_MS = Number(process.env.LISTA_LINK_CACHE_TTL_MS || 5 * 60 * 1000);
+
+const listaLinkCache = {
+  at: 0,
+  map: null,
+  sourceUrl: ''
+};
 
 // Uses native fetch on Node 18+ with a node-fetch fallback.
 const fetchFn =
@@ -32,6 +40,17 @@ function buildSheetBaseUrl(sheetId) {
   }
 
   return `https://docs.google.com/spreadsheets/d/${id}`;
+}
+
+function getCandidateSheetIds() {
+  const seen = new Set();
+  return [SHEET_ID, process.env.GOOGLE_SPREADSHEET_ID || '', DEFAULT_SPREADSHEET_ID]
+    .map((value) => String(value || '').trim())
+    .filter((value) => value && !seen.has(value) && seen.add(value));
+}
+
+function getDirectSheetIds() {
+  return getCandidateSheetIds().filter((value) => !value.startsWith('2PACX-'));
 }
 
 function csvUrl(range, options = {}, sheetId = SHEET_ID) {
@@ -123,14 +142,7 @@ function parseCsv(csvText) {
 }
 
 async function fetchSheet(range, options = {}) {
-  const tried = new Set();
-  const candidateIds = [
-    SHEET_ID,
-    process.env.GOOGLE_SPREADSHEET_ID || '',
-    DEFAULT_SPREADSHEET_ID
-  ]
-    .map((value) => String(value || '').trim())
-    .filter((value) => value && !tried.has(value) && tried.add(value));
+  const candidateIds = getCandidateSheetIds();
 
   let lastError = new Error('No sheet id configured.');
 
@@ -186,6 +198,319 @@ function getRangeStartColumn(range) {
   const text = String(range || '').trim().toUpperCase();
   const match = text.match(/^([A-Z]+)(?:\d*)\s*:\s*[A-Z]+(?:\d*)$/);
   return match ? match[1] : 'A';
+}
+
+function getRangeColumns(range) {
+  const text = String(range || '').trim().toUpperCase();
+  const match = text.match(/^([A-Z]+)(?:\d*)\s*:\s*([A-Z]+)(?:\d*)$/);
+
+  if (!match) {
+    return { start: 0, end: Number.MAX_SAFE_INTEGER };
+  }
+
+  return {
+    start: toColIndex(match[1]),
+    end: toColIndex(match[2])
+  };
+}
+
+function normalizeUrl(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (/^https?:\/\//i.test(text)) return text;
+  if (/^www\./i.test(text)) return `https://${text}`;
+  return '';
+}
+
+function splitFormulaArgs(text) {
+  const args = [];
+  let current = '';
+  let depth = 0;
+  let inString = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = text[i + 1];
+
+    if (inString) {
+      current += ch;
+      if (ch === '"' && next === '"') {
+        current += next;
+        i += 1;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      current += ch;
+      continue;
+    }
+
+    if (ch === '(') {
+      depth += 1;
+      current += ch;
+      continue;
+    }
+
+    if (ch === ')') {
+      depth = Math.max(0, depth - 1);
+      current += ch;
+      continue;
+    }
+
+    if (ch === ',' && depth === 0) {
+      args.push(current.trim());
+      current = '';
+      continue;
+    }
+
+    current += ch;
+  }
+
+  if (current.trim() || args.length) {
+    args.push(current.trim());
+  }
+
+  return args;
+}
+
+function splitFormulaConcat(text) {
+  const out = [];
+  let current = '';
+  let depth = 0;
+  let inString = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = text[i + 1];
+
+    if (inString) {
+      current += ch;
+      if (ch === '"' && next === '"') {
+        current += next;
+        i += 1;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      current += ch;
+      continue;
+    }
+
+    if (ch === '(') {
+      depth += 1;
+      current += ch;
+      continue;
+    }
+
+    if (ch === ')') {
+      depth = Math.max(0, depth - 1);
+      current += ch;
+      continue;
+    }
+
+    if (ch === '&' && depth === 0) {
+      out.push(current.trim());
+      current = '';
+      continue;
+    }
+
+    current += ch;
+  }
+
+  if (current.trim() || out.length) {
+    out.push(current.trim());
+  }
+
+  return out;
+}
+
+function parseA1Reference(text, defaultSheetName) {
+  const raw = String(text || '').trim();
+  const match = raw.match(/^(?:(?:'([^']+)'|([^!]+))!)?(\$?[A-Z]{1,3}\$?\d+)$/i);
+  if (!match) return null;
+
+  const sheetName = String(match[1] || match[2] || defaultSheetName || '').trim();
+  const cell = match[3].replace(/\$/g, '').toUpperCase();
+  if (!sheetName || !cell) return null;
+
+  return { sheetName, cell };
+}
+
+function getWorkbookSheet(workbook, sheetName) {
+  if (!workbook || !Array.isArray(workbook.SheetNames)) return null;
+  const exact = workbook.Sheets[sheetName];
+  if (exact) return exact;
+
+  const normalized = normalizeText(sheetName);
+  const foundName = workbook.SheetNames.find((name) => normalizeText(name) === normalized);
+  return foundName ? workbook.Sheets[foundName] : null;
+}
+
+function getWorkbookCellText(workbook, sheetName, cellA1) {
+  const sheet = getWorkbookSheet(workbook, sheetName);
+  if (!sheet) return '';
+
+  const cell = sheet[cellA1];
+  if (!cell) return '';
+
+  if (typeof cell.w === 'string' && cell.w.trim()) return cell.w.trim();
+  if (cell.v == null) return '';
+  return String(cell.v).trim();
+}
+
+function evalFormulaNumber(expr, workbook, defaultSheetName) {
+  const text = String(expr || '').trim();
+  if (!text) return NaN;
+  if (/^-?\d+(?:\.\d+)?$/.test(text)) return Number(text);
+
+  const ref = parseA1Reference(text, defaultSheetName);
+  if (ref) {
+    const rawValue = getWorkbookCellText(workbook, ref.sheetName, ref.cell);
+    const normalized = rawValue.replace(',', '.');
+    const value = Number(normalized);
+    return Number.isFinite(value) ? value : NaN;
+  }
+
+  return NaN;
+}
+
+function evalFormulaText(expr, workbook, defaultSheetName, depth = 0) {
+  if (depth > 8) return '';
+  const text = String(expr || '').trim();
+  if (!text) return '';
+
+  if (text.startsWith('"') && text.endsWith('"') && text.length >= 2) {
+    return text.slice(1, -1).replace(/""/g, '"');
+  }
+
+  const concatParts = splitFormulaConcat(text);
+  if (concatParts.length > 1) {
+    return concatParts
+      .map((part) => evalFormulaText(part, workbook, defaultSheetName, depth + 1))
+      .join('');
+  }
+
+  const midMatch = text.match(/^MID\(([\s\S]*)\)$/i);
+  if (midMatch) {
+    const args = splitFormulaArgs(midMatch[1]);
+    if (args.length >= 3) {
+      const source = evalFormulaText(args[0], workbook, defaultSheetName, depth + 1);
+      const start = Math.trunc(evalFormulaNumber(args[1], workbook, defaultSheetName));
+      const len = Math.trunc(evalFormulaNumber(args[2], workbook, defaultSheetName));
+
+      if (!source || !Number.isFinite(start) || !Number.isFinite(len) || start <= 0 || len <= 0) {
+        return '';
+      }
+
+      return source.slice(start - 1, start - 1 + len);
+    }
+  }
+
+  const ref = parseA1Reference(text, defaultSheetName);
+  if (ref) {
+    return getWorkbookCellText(workbook, ref.sheetName, ref.cell);
+  }
+
+  return '';
+}
+
+function extractLinkFromFormula(formula, workbook, sheetName) {
+  const raw = String(formula || '').trim().replace(/^=/, '');
+  if (!raw) return '';
+
+  const match = raw.match(/^HYPERLINK\(([\s\S]*)\)$/i);
+  if (!match) return '';
+
+  const args = splitFormulaArgs(match[1]);
+  if (!args.length) return '';
+
+  const resolved = evalFormulaText(args[0], workbook, sheetName);
+  const normalized = normalizeUrl(resolved);
+  if (normalized) return normalized;
+
+  const directInFormula = raw.match(/https?:\/\/[^\s)",]+/i);
+  return directInFormula ? normalizeUrl(directInFormula[0]) : '';
+}
+
+async function fetchListaLinkMapFromXlsx() {
+  const now = Date.now();
+  if (listaLinkCache.map && now - listaLinkCache.at < LISTA_LINK_CACHE_TTL_MS) {
+    return { map: listaLinkCache.map, sourceUrl: listaLinkCache.sourceUrl };
+  }
+
+  const directIds = getDirectSheetIds();
+  if (!directIds.length) {
+    throw new Error('Nenhum id direto da planilha foi configurado para exportar XLSX.');
+  }
+
+  const { start, end } = getRangeColumns(RANGE_LISTA);
+  let lastError = new Error('Falha ao carregar links do XLSX.');
+
+  for (const sheetId of directIds) {
+    const exportUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=xlsx`;
+    try {
+      const response = await fetchFn(exportUrl);
+      if (!response.ok) {
+        lastError = new Error(`XLSX export retornou ${response.status}.`);
+        continue;
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const workbook = XLSX.read(buffer, {
+        type: 'buffer',
+        cellFormula: true,
+        cellText: true
+      });
+
+      const targetSheetName =
+        workbook.SheetNames.find((name) => normalizeText(name) === normalizeText(LISTA_SHEET_NAME)) ||
+        LISTA_SHEET_NAME;
+      const sheet = getWorkbookSheet(workbook, targetSheetName);
+
+      if (!sheet) {
+        lastError = new Error(`Aba ${LISTA_SHEET_NAME} nao encontrada no XLSX.`);
+        continue;
+      }
+
+      const linkMap = {};
+      for (const [address, cell] of Object.entries(sheet)) {
+        if (address.startsWith('!')) continue;
+
+        const decoded = XLSX.utils.decode_cell(address);
+        if (decoded.c < start || decoded.c > end) continue;
+
+        let link = normalizeUrl(cell?.l?.Target);
+        if (!link && cell?.f) {
+          link = extractLinkFromFormula(cell.f, workbook, targetSheetName);
+        }
+
+        if (!link) {
+          link = normalizeUrl(cell?.w || cell?.v);
+        }
+
+        if (!link) continue;
+        linkMap[address.toUpperCase()] = link;
+      }
+
+      listaLinkCache.at = now;
+      listaLinkCache.map = linkMap;
+      listaLinkCache.sourceUrl = exportUrl;
+
+      return { map: linkMap, sourceUrl: exportUrl };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError;
 }
 
 function extractNumbersFromCell(text) {
@@ -407,12 +732,39 @@ app.get('/api/lista', async (req, res) => {
       });
     }
 
+    let linksWarning = '';
+    let linkSourceUrl = '';
+    let linkMap = {};
+
+    try {
+      const linkPayload = await fetchListaLinkMapFromXlsx();
+      linkMap = linkPayload.map || {};
+      linkSourceUrl = linkPayload.sourceUrl || '';
+    } catch (error) {
+      linksWarning = `Nao foi possivel carregar hyperlinks automaticamente (${error.message}).`;
+    }
+
+    const items = (selected.items || []).map((item) => {
+      const link = String(linkMap[String(item.cell || '').toUpperCase()] || '').trim();
+      return {
+        ...item,
+        link,
+        hasLink: Boolean(link)
+      };
+    });
+
+    const withLinkCount = items.filter((item) => item.hasLink).length;
+    if (!linksWarning && withLinkCount === 0) {
+      linksWarning = 'Nenhum hyperlink encontrado para as celulas selecionadas.';
+    }
+
     res.json({
       sheet: LISTA_SHEET_NAME,
       range: RANGE_LISTA,
-      source: 'gviz_csv',
+      source: 'gviz_csv + xlsx_export',
       sourceUrl: payload.sourceUrl,
-      warning: 'Os links so aparecem se existirem como URL publica no proprio intervalo.',
+      linkSourceUrl,
+      warning: linksWarning,
       options: {
         listas: catalog.listas,
         anosByLista: catalog.anosByLista
@@ -421,7 +773,7 @@ app.get('/api/lista', async (req, res) => {
         lista: selected.lista,
         ano: selected.ano
       },
-      items: selected.items
+      items
     });
   } catch (err) {
     console.error('[api/lista] error:', err);
