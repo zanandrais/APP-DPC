@@ -14,7 +14,7 @@
     <header>
       <p class="eyebrow">APP DPC</p>
       <h1>Aba DPC - Visao organizada</h1>
-      <p class="muted">Abas: DPC (A1:B5), Agenda (F5:T43) e Lista (R:AZ).</p>
+      <p class="muted">Abas: DPC (A1:B5), Agenda (F5:T43) e Gabarito (A:ZZ).</p>
       <div class="actions">
         <button id="reload">Atualizar</button>
         <span id="status" class="status">Carregando...</span>
@@ -31,7 +31,7 @@
           <div class="tab-switch" role="tablist" aria-label="Abas de visualizacao">
             <button id="tab-dpc" class="tab-btn is-active" data-tab="dpc" type="button" role="tab" aria-selected="true">DPC</button>
             <button id="tab-agenda" class="tab-btn" data-tab="agenda" type="button" role="tab" aria-selected="false">Agenda</button>
-            <button id="tab-lista" class="tab-btn" data-tab="lista" type="button" role="tab" aria-selected="false">Lista</button>
+            <button id="tab-lista" class="tab-btn" data-tab="lista" type="button" role="tab" aria-selected="false">Gabarito</button>
           </div>
         </div>
 
@@ -55,10 +55,6 @@
               <label>
                 <span>Lista</span>
                 <select id="lista-select"></select>
-              </label>
-              <label>
-                <span>Ano</span>
-                <select id="ano-select"></select>
               </label>
               <button id="lista-load" type="submit">Carregar lista</button>
             </form>
@@ -86,14 +82,13 @@
     const listaView = document.getElementById('view-lista');
     const listaForm = document.getElementById('lista-form');
     const listaSelect = document.getElementById('lista-select');
-    const anoSelect = document.getElementById('ano-select');
     const listaMeta = document.getElementById('lista-meta');
     const listaItems = document.getElementById('lista-items');
 
     const TAB_CONFIG = {
       dpc: { title: 'DPC / A1:B5', endpoint: '/api/data' },
       agenda: { title: 'DPC / F5:T43', endpoint: '/api/agenda' },
-      lista: { title: 'Lista / R:AZ', endpoint: '/api/lista' }
+      lista: { title: 'Gabarito / A:ZZ', endpoint: '/api/lista' }
     };
 
     const cache = { dpc: null, agenda: null, lista: null };
@@ -117,7 +112,6 @@
     function buildListaParams() {
       const params = new URLSearchParams();
       if (listaSelect.value) params.set('lista', listaSelect.value);
-      if (anoSelect.value) params.set('ano', anoSelect.value);
       return params.toString();
     }
 
@@ -289,27 +283,10 @@
       });
     }
 
-    function fillAnoOptions(anos, selected) {
-      anoSelect.innerHTML = '';
-      (anos || []).forEach((ano) => {
-        const option = document.createElement('option');
-        option.value = ano;
-        option.textContent = ano;
-        anoSelect.appendChild(option);
-      });
-
-      if (selected && (anos || []).includes(selected)) {
-        anoSelect.value = selected;
-      } else if ((anos || []).length) {
-        anoSelect.value = anos[0];
-      }
-    }
-
     function renderLista(payload) {
       const options = payload?.options || {};
       const selected = payload?.selected || {};
       const listas = options.listas || [];
-      const anosByLista = options.anosByLista || {};
 
       listaSelect.innerHTML = '';
       listas.forEach((listaName) => {
@@ -321,14 +298,13 @@
 
       const selectedLista = selected.lista || listas[0] || '';
       if (selectedLista) listaSelect.value = selectedLista;
-      fillAnoOptions(anosByLista[selectedLista] || [], selected.ano || '');
 
       const items = payload?.items || [];
       const withLink = items.filter((item) => item.hasLink && item.link).length;
       const warning = payload?.warning ? ` | ${payload.warning}` : '';
 
       listaMeta.textContent =
-        `${selectedLista || '-'} | ${anoSelect.value || '-'} | ${items.length} numero(s) | ${withLink} link(s)${warning}`;
+        `${selectedLista || '-'} | ${items.length} numero(s) | ${withLink} link(s)${warning}`;
 
       if (!items.length) {
         listaItems.innerHTML = '<li class="empty">Nenhum numero encontrado.</li>';
@@ -388,12 +364,6 @@
       cache.lista = null;
       setActiveTab('lista');
       loadData(true);
-    });
-
-    listaSelect.addEventListener('change', () => {
-      const payload = cache.lista;
-      const anos = payload?.options?.anosByLista?.[listaSelect.value] || [];
-      fillAnoOptions(anos, '');
     });
 
     setActiveTab('dpc');

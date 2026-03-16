@@ -8,3 +8,9 @@ services:
     envVars:
       - key: SHEET_NAME
         value: DPC
+      - key: SHEET_LISTA_NAME
+        value: Gabarito
+      - key: SHEET_LISTA_COL_START
+        value: A
+      - key: SHEET_LISTA_COL_END
+        value: ZZ
