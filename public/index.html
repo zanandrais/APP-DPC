@@ -45,6 +45,7 @@
           <section id="view-agenda" class="tab-view">
             <div class="agenda-wrap">
               <table id="agenda-table" class="agenda-table" aria-live="polite">
+                <colgroup></colgroup>
                 <tbody></tbody>
               </table>
             </div>
@@ -200,16 +201,21 @@
 
       const isSingleColumn = (rows || []).every((row) => (row || []).length <= 1);
       if (isSingleColumn) {
+        const topRow = normalizedRows[0];
+        const topSection = document.createElement('section');
+        topSection.className = 'sheet-top';
+        topSection.innerHTML = `
+          <p class="sheet-top-label">Data</p>
+          <div class="sheet-top-value">${topRow.left || '-'}</div>
+        `;
+        board.appendChild(topSection);
+
         const list = document.createElement('div');
         list.className = 'sheet-list';
 
-        normalizedRows.forEach((row, index) => {
+        normalizedRows.slice(1).forEach((row) => {
           const section = document.createElement('section');
-          section.className = 'sheet-row';
-
-          const title = document.createElement('div');
-          title.className = 'sheet-row-title';
-          title.textContent = `${index + 1}`;
+          section.className = 'sheet-row sheet-row-single';
 
           const content = document.createElement('div');
           content.className = 'sheet-row-content';
@@ -219,7 +225,6 @@
           paragraph.textContent = row.left || '-';
           content.appendChild(paragraph);
 
-          section.appendChild(title);
           section.appendChild(content);
           list.appendChild(section);
         });
@@ -282,7 +287,15 @@
     }
 
     function renderAgenda(rows) {
+      const colgroup = agendaTable.querySelector('colgroup');
       const tbody = agendaTable.querySelector('tbody');
+      colgroup.innerHTML = `
+        <col class="agenda-col">
+        <col class="agenda-col">
+        <col class="agenda-col agenda-col-quarta">
+        <col class="agenda-col">
+        <col class="agenda-col">
+      `;
       tbody.innerHTML = '';
 
       const matrix = normalizeAgendaRows(rows);
@@ -294,7 +307,7 @@
       matrix.forEach((row, rowIndex) => {
         const tr = document.createElement('tr');
 
-        row.forEach((cell) => {
+        row.forEach((cell, colIndex) => {
           const td = document.createElement('td');
           td.textContent = cell;
 
@@ -304,6 +317,10 @@
             td.classList.add('agenda-day');
           } else if (cell) {
             td.classList.add('agenda-text');
+          }
+
+          if (colIndex === 2) {
+            td.classList.add('agenda-col-quarta-cell');
           }
 
           tr.appendChild(td);

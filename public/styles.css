@@ -216,6 +216,10 @@ main {
   );
 }
 
+.sheet-row-single {
+  grid-template-columns: 1fr;
+}
+
 .sheet-row-title {
   display: flex;
   align-items: center;
@@ -272,6 +276,14 @@ main {
   background: rgba(0, 0, 0, 0.08);
 }
 
+.agenda-col {
+  width: 23%;
+}
+
+.agenda-col-quarta {
+  width: 8%;
+}
+
 .agenda-table td {
   border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 8px 10px;
@@ -300,6 +312,11 @@ main {
 
 .agenda-table td.agenda-text {
   color: #f4f7ff;
+}
+
+.agenda-table td.agenda-col-quarta-cell {
+  padding-left: 6px;
+  padding-right: 6px;
 }
 
 .lista-controls {
