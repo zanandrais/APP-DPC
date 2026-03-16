@@ -20,8 +20,8 @@ const GOOGLE_SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID || DEFAULT_SPREA
 const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '';
 const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY || '';
 
-const RANGE_DPC = 'A1:B5';
-const RANGE_AGENDA = 'F5:T43';
+const RANGE_DPC = 'B1:B7';
+const RANGE_AGENDA = 'G7:K43';
 const RANGE_LISTA = `${LISTA_COL_START}:${LISTA_COL_END}`;
 const LISTA_LINK_CACHE_TTL_MS = Number(process.env.LISTA_LINK_CACHE_TTL_MS || 5 * 60 * 1000);
 
@@ -1296,7 +1296,7 @@ app.get('/api/data', async (_req, res) => {
     res.json({ data: payload.rows, sourceUrl: payload.sourceUrl });
   } catch (err) {
     console.error('[api/data] error:', err);
-    res.status(500).json({ error: 'Falha ao buscar DPC A1:B5', detail: err.message });
+    res.status(500).json({ error: 'Falha ao buscar DPC B1:B7', detail: err.message });
   }
 });
 
@@ -1306,7 +1306,7 @@ app.get('/api/agenda', async (_req, res) => {
     res.json({ data: payload.rows, sourceUrl: payload.sourceUrl });
   } catch (err) {
     console.error('[api/agenda] error:', err);
-    res.status(500).json({ error: 'Falha ao buscar DPC F5:T43', detail: err.message });
+    res.status(500).json({ error: 'Falha ao buscar DPC G7:K43', detail: err.message });
   }
 });
 

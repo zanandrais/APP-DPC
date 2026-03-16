@@ -2,8 +2,8 @@
 
 Aplicacao web para visualizar a planilha publicada em tres abas:
 
-- `DPC` (`A1:B5`)
-- `Agenda` (`F5:T43`)
+- `DPC` (`B1:B7`)
+- `Agenda` (`G7:K43`)
 - `Gabarito` (`A:ZZ`, exibido na aba de listas)
 
 ## Executar localmente
@@ -34,6 +34,6 @@ Acesse `http://localhost:3000`.
 
 ## Endpoints
 
-- `GET /api/data` retorna `DPC!A1:B5`
-- `GET /api/agenda` retorna `DPC!F5:T43`
+- `GET /api/data` retorna `DPC!B1:B7`
+- `GET /api/agenda` retorna `DPC!G7:K43`
 - `GET /api/lista` retorna leitura de `Gabarito!A:ZZ` com filtro opcional `lista`

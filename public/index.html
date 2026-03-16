@@ -14,7 +14,7 @@
     <header>
       <p class="eyebrow">APP DPC</p>
       <h1>Aba DPC - Visao organizada</h1>
-      <p class="muted">Abas: DPC (A1:B5), Agenda (F5:T43) e Gabarito (A:ZZ).</p>
+      <p class="muted">Abas: DPC (B1:B7), Agenda (G7:K43) e Gabarito (A:ZZ).</p>
       <div class="actions">
         <button id="reload">Atualizar</button>
         <span id="status" class="status">Carregando...</span>
@@ -26,7 +26,7 @@
         <div class="card-header">
           <div>
             <p class="label">Planilha</p>
-            <p id="view-title" class="value">DPC / A1:B5</p>
+            <p id="view-title" class="value">DPC / B1:B7</p>
           </div>
           <div class="tab-switch" role="tablist" aria-label="Abas de visualizacao">
             <button id="tab-dpc" class="tab-btn is-active" data-tab="dpc" type="button" role="tab" aria-selected="true">DPC</button>
@@ -86,8 +86,8 @@
     const listaItems = document.getElementById('lista-items');
 
     const TAB_CONFIG = {
-      dpc: { title: 'DPC / A1:B5', endpoint: '/api/data' },
-      agenda: { title: 'DPC / F5:T43', endpoint: '/api/agenda' },
+      dpc: { title: 'DPC / B1:B7', endpoint: '/api/data' },
+      agenda: { title: 'DPC / G7:K43', endpoint: '/api/agenda' },
       lista: { title: 'Gabarito / A:ZZ', endpoint: '/api/lista' }
     };
 
@@ -195,6 +195,36 @@
 
       if (!normalizedRows.length) {
         board.innerHTML = '<p class="empty">Nenhum dado retornado</p>';
+        return;
+      }
+
+      const isSingleColumn = (rows || []).every((row) => (row || []).length <= 1);
+      if (isSingleColumn) {
+        const list = document.createElement('div');
+        list.className = 'sheet-list';
+
+        normalizedRows.forEach((row, index) => {
+          const section = document.createElement('section');
+          section.className = 'sheet-row';
+
+          const title = document.createElement('div');
+          title.className = 'sheet-row-title';
+          title.textContent = `${index + 1}`;
+
+          const content = document.createElement('div');
+          content.className = 'sheet-row-content';
+
+          const paragraph = document.createElement('p');
+          paragraph.className = 'sheet-line';
+          paragraph.textContent = row.left || '-';
+          content.appendChild(paragraph);
+
+          section.appendChild(title);
+          section.appendChild(content);
+          list.appendChild(section);
+        });
+
+        board.appendChild(list);
         return;
       }
 
