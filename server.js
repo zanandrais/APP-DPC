@@ -339,7 +339,7 @@ function extractListaCellLink(cell) {
     }
   }
 
-  return normalizeListaHyperlink(extractHyperlinkFromFormula(cell?.userEnteredValue?.formulaValue));
+  return '';
 }
 
 async function fetchListaCellsBySheetsApi() {
@@ -614,7 +614,7 @@ function buildListaCatalogFromCells(cells) {
 
   for (const columnCells of byColumn.values()) {
     const sortedColumn = [...columnCells].sort((a, b) => a.row - b.row);
-    const header = sortedColumn.find((cell) => isListaTitle(cell.text));
+    const header = sortedColumn.find((cell) => cell.row === 1 && isListaTitle(cell.text));
     if (!header) continue;
 
     const listName = String(header.text || '').trim();
@@ -705,12 +705,12 @@ async function fetchListaData(selectedList) {
   let warning = '';
 
   try {
-    sourcePayload = await fetchListaCellsByXlsx();
-  } catch (xlsxError) {
+    sourcePayload = await fetchListaCellsBySheetsApi();
+  } catch (apiError) {
     sourcePayload = await fetchListaCellsByGviz();
-    warning = 'Nao foi possivel carregar os hyperlinks automaticamente.';
-    if (xlsxError?.message) {
-      warning += ` (${xlsxError.message})`;
+    warning = 'Nao foi possivel carregar os hyperlinks automaticamente a partir da aba Gabarito.';
+    if (apiError?.message) {
+      warning += ` (${apiError.message})`;
     }
   }
 
