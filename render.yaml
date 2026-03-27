@@ -20,3 +20,5 @@ services:
         value: A
       - key: SHEET_GABARITO_CB_COL_END
         value: ZZ
+      - key: SHEET_GABARITO_CB_MAX_ROW
+        value: 40

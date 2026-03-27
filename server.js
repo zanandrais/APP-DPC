@@ -19,6 +19,7 @@ const LISTA_COL_END = process.env.SHEET_LISTA_COL_END || 'ZZ';
 const GABARITO_CB_SHEET_NAME = process.env.SHEET_GABARITO_CB_NAME || 'GabaritoCB';
 const GABARITO_CB_COL_START = process.env.SHEET_GABARITO_CB_COL_START || 'A';
 const GABARITO_CB_COL_END = process.env.SHEET_GABARITO_CB_COL_END || 'ZZ';
+const GABARITO_CB_MAX_ROW = Number(process.env.SHEET_GABARITO_CB_MAX_ROW || 40);
 const GOOGLE_SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID || DEFAULT_SPREADSHEET_ID;
 const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '';
 const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY || '';
@@ -354,9 +355,9 @@ function extractListaCellLink(cell) {
   return '';
 }
 
-async function fetchCellsBySheetsApi(sheetName, bounds) {
+async function fetchCellsBySheetsApi(sheetName, bounds, rangeA1 = `${bounds.startColLabel}:${bounds.endColLabel}`) {
   const sheets = getSheetsClient();
-  const a1Range = `'${sheetName}'!${bounds.startColLabel}:${bounds.endColLabel}`;
+  const a1Range = `'${sheetName}'!${rangeA1}`;
 
   const response = await sheets.spreadsheets.get({
     spreadsheetId: GOOGLE_SPREADSHEET_ID,
@@ -497,8 +498,8 @@ async function fetchListaCellsByXlsx() {
   throw lastError;
 }
 
-async function fetchCellsByGviz(sheetName, bounds) {
-  const payload = await fetchSheet(`${bounds.startColLabel}:${bounds.endColLabel}`, {
+async function fetchCellsByGviz(sheetName, bounds, rangeA1 = `${bounds.startColLabel}:${bounds.endColLabel}`) {
+  const payload = await fetchSheet(rangeA1, {
     sheetName,
     allowGid: false
   });
@@ -538,11 +539,15 @@ async function fetchListaCellsByGviz() {
 }
 
 async function fetchGabaritoCbCellsBySheetsApi() {
-  return fetchCellsBySheetsApi(GABARITO_CB_SHEET_NAME, getGabaritoCbColumnBounds());
+  const bounds = getGabaritoCbColumnBounds();
+  const rangeA1 = `${bounds.startColLabel}1:${bounds.endColLabel}${GABARITO_CB_MAX_ROW}`;
+  return fetchCellsBySheetsApi(GABARITO_CB_SHEET_NAME, bounds, rangeA1);
 }
 
 async function fetchGabaritoCbCellsByGviz() {
-  return fetchCellsByGviz(GABARITO_CB_SHEET_NAME, getGabaritoCbColumnBounds());
+  const bounds = getGabaritoCbColumnBounds();
+  const rangeA1 = `${bounds.startColLabel}1:${bounds.endColLabel}${GABARITO_CB_MAX_ROW}`;
+  return fetchCellsByGviz(GABARITO_CB_SHEET_NAME, bounds, rangeA1);
 }
 
 function isExerciseNumber(text) {
@@ -881,7 +886,7 @@ function selectGabaritoCbColumn(columns, selectedTurma, selectedNome) {
 
 async function fetchGabaritoCbData(selectedTurma, selectedNome) {
   const bounds = getGabaritoCbColumnBounds();
-  const range = `${bounds.startColLabel}:${bounds.endColLabel}`;
+  const range = `${bounds.startColLabel}1:${bounds.endColLabel}${GABARITO_CB_MAX_ROW}`;
 
   let sourcePayload;
   let warning = '';

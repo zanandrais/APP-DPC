@@ -32,6 +32,7 @@ Acesse `http://localhost:3000`.
 - `SHEET_GABARITO_CB_NAME` (padrao: `GabaritoCB`)
 - `SHEET_GABARITO_CB_COL_START` (padrao: `A`)
 - `SHEET_GABARITO_CB_COL_END` (padrao: `ZZ`)
+- `SHEET_GABARITO_CB_MAX_ROW` (padrao: `40`)
 - `GOOGLE_SPREADSHEET_ID` (id direto `/d/...`, padrao do projeto)
 - `GOOGLE_SERVICE_ACCOUNT_EMAIL` (opcional, legado)
 - `GOOGLE_PRIVATE_KEY` (opcional, legado)
