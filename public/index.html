@@ -14,7 +14,7 @@
     <header>
       <p class="eyebrow">APP DPC</p>
       <h1>Aba DPC - Visao organizada</h1>
-      <p class="muted">Abas: DPC (B1:B7), Agenda (G7:K43) e Gabarito (A:ZZ).</p>
+      <p class="muted">Abas: DPC (B1:B7), Agenda (G7:K43), Gabarito (A:ZZ) e Gabarito CB (A:ZZ).</p>
       <div class="actions">
         <button id="reload">Atualizar</button>
         <span id="status" class="status">Carregando...</span>
@@ -32,6 +32,7 @@
             <button id="tab-dpc" class="tab-btn is-active" data-tab="dpc" type="button" role="tab" aria-selected="true">DPC</button>
             <button id="tab-agenda" class="tab-btn" data-tab="agenda" type="button" role="tab" aria-selected="false">Agenda</button>
             <button id="tab-lista" class="tab-btn" data-tab="lista" type="button" role="tab" aria-selected="false">Gabarito</button>
+            <button id="tab-gabarito-cb" class="tab-btn" data-tab="gabaritoCb" type="button" role="tab" aria-selected="false">Gabarito CB</button>
           </div>
         </div>
 
@@ -57,12 +58,33 @@
                 <span>Lista</span>
                 <select id="lista-select"></select>
               </label>
+              <div class="lista-spacer" aria-hidden="true"></div>
               <button id="lista-load" type="submit">Carregar lista</button>
             </form>
 
             <div id="lista-meta" class="lista-meta">Carregando...</div>
 
             <ul id="lista-items" class="lista-items" aria-live="polite">
+              <li class="empty">Carregando...</li>
+            </ul>
+          </section>
+
+          <section id="view-gabarito-cb" class="tab-view">
+            <form id="gabarito-cb-form" class="lista-controls">
+              <label>
+                <span>Turma</span>
+                <select id="gabarito-cb-turma"></select>
+              </label>
+              <label>
+                <span>Nome</span>
+                <select id="gabarito-cb-nome"></select>
+              </label>
+              <button id="gabarito-cb-load" type="submit">Carregar gabarito</button>
+            </form>
+
+            <div id="gabarito-cb-meta" class="lista-meta">Carregando...</div>
+
+            <ul id="gabarito-cb-items" class="lista-items" aria-live="polite">
               <li class="empty">Carregando...</li>
             </ul>
           </section>
@@ -81,18 +103,27 @@
     const dpcView = document.getElementById('view-dpc');
     const agendaView = document.getElementById('view-agenda');
     const listaView = document.getElementById('view-lista');
+    const gabaritoCbView = document.getElementById('view-gabarito-cb');
+
     const listaForm = document.getElementById('lista-form');
     const listaSelect = document.getElementById('lista-select');
     const listaMeta = document.getElementById('lista-meta');
     const listaItems = document.getElementById('lista-items');
 
+    const gabaritoCbForm = document.getElementById('gabarito-cb-form');
+    const gabaritoCbTurmaSelect = document.getElementById('gabarito-cb-turma');
+    const gabaritoCbNomeSelect = document.getElementById('gabarito-cb-nome');
+    const gabaritoCbMeta = document.getElementById('gabarito-cb-meta');
+    const gabaritoCbItems = document.getElementById('gabarito-cb-items');
+
     const TAB_CONFIG = {
       dpc: { title: 'DPC / B1:B7', endpoint: '/api/data' },
       agenda: { title: 'DPC / G7:K43', endpoint: '/api/agenda' },
-      lista: { title: 'Gabarito / A:ZZ', endpoint: '/api/lista' }
+      lista: { title: 'Gabarito / A:ZZ', endpoint: '/api/lista' },
+      gabaritoCb: { title: 'Gabarito CB / A:ZZ', endpoint: '/api/gabarito-cb' }
     };
 
-    const cache = { dpc: null, agenda: null, lista: null };
+    const cache = { dpc: null, agenda: null, lista: null, gabaritoCb: null };
     let activeTab = 'dpc';
 
     function setActiveTab(tab) {
@@ -102,6 +133,7 @@
       dpcView.classList.toggle('is-active', tab === 'dpc');
       agendaView.classList.toggle('is-active', tab === 'agenda');
       listaView.classList.toggle('is-active', tab === 'lista');
+      gabaritoCbView.classList.toggle('is-active', tab === 'gabaritoCb');
 
       tabButtons.forEach((button) => {
         const isActive = button.dataset.tab === tab;
@@ -110,9 +142,41 @@
       });
     }
 
+    function fillSelect(selectEl, values, selectedValue, emptyLabel) {
+      selectEl.innerHTML = '';
+
+      if (!values.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = emptyLabel;
+        selectEl.appendChild(option);
+        return;
+      }
+
+      values.forEach((value) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value;
+        selectEl.appendChild(option);
+      });
+
+      if (selectedValue && values.includes(selectedValue)) {
+        selectEl.value = selectedValue;
+      } else {
+        selectEl.value = values[0];
+      }
+    }
+
     function buildListaParams() {
       const params = new URLSearchParams();
       if (listaSelect.value) params.set('lista', listaSelect.value);
+      return params.toString();
+    }
+
+    function buildGabaritoCbParams() {
+      const params = new URLSearchParams();
+      if (gabaritoCbTurmaSelect.value) params.set('turma', gabaritoCbTurmaSelect.value);
+      if (gabaritoCbNomeSelect.value) params.set('nome', gabaritoCbNomeSelect.value);
       return params.toString();
     }
 
@@ -130,6 +194,9 @@
         let endpoint = TAB_CONFIG[activeTab].endpoint;
         if (activeTab === 'lista') {
           const query = buildListaParams();
+          if (query) endpoint += `?${query}`;
+        } else if (activeTab === 'gabaritoCb') {
+          const query = buildGabaritoCbParams();
           if (query) endpoint += `?${query}`;
         }
 
@@ -157,6 +224,8 @@
         renderAgenda(payload.data || []);
       } else if (tab === 'lista') {
         renderLista(payload);
+      } else if (tab === 'gabaritoCb') {
+        renderGabaritoCb(payload);
       } else {
         renderDpc(payload.data || []);
       }
@@ -169,6 +238,9 @@
       } else if (tab === 'lista') {
         listaMeta.textContent = message;
         listaItems.innerHTML = `<li class="empty">${message}</li>`;
+      } else if (tab === 'gabaritoCb') {
+        gabaritoCbMeta.textContent = message;
+        gabaritoCbItems.innerHTML = `<li class="empty">${message}</li>`;
       } else {
         board.innerHTML = `<p class="empty">${message}</p>`;
       }
@@ -330,35 +402,13 @@
       });
     }
 
-    function renderLista(payload) {
-      const options = payload?.options || {};
-      const selected = payload?.selected || {};
-      const listas = options.listas || [];
-
-      listaSelect.innerHTML = '';
-      listas.forEach((listaName) => {
-        const option = document.createElement('option');
-        option.value = listaName;
-        option.textContent = listaName;
-        listaSelect.appendChild(option);
-      });
-
-      const selectedLista = selected.lista || listas[0] || '';
-      if (selectedLista) listaSelect.value = selectedLista;
-
-      const items = payload?.items || [];
-      const withLink = items.filter((item) => item.hasLink && item.link).length;
-      const warning = payload?.warning ? ` | ${payload.warning}` : '';
-
-      listaMeta.textContent =
-        `${selectedLista || '-'} | ${items.length} numero(s) | ${withLink} link(s)${warning}`;
-
+    function renderNumberItems(targetEl, items) {
       if (!items.length) {
-        listaItems.innerHTML = '<li class="empty">Nenhum numero encontrado.</li>';
+        targetEl.innerHTML = '<li class="empty">Nenhum numero encontrado.</li>';
         return;
       }
 
-      listaItems.innerHTML = '';
+      targetEl.innerHTML = '';
       items.forEach((item, idx) => {
         const li = document.createElement('li');
         li.className = 'lista-item';
@@ -391,8 +441,50 @@
 
         li.appendChild(left);
         li.appendChild(right);
-        listaItems.appendChild(li);
+        targetEl.appendChild(li);
       });
+    }
+
+    function renderLista(payload) {
+      const options = payload?.options || {};
+      const selected = payload?.selected || {};
+      const listas = options.listas || [];
+
+      fillSelect(listaSelect, listas, selected.lista || '', 'Sem listas');
+
+      const items = payload?.items || [];
+      const withLink = items.filter((item) => item.hasLink && item.link).length;
+      const warning = payload?.warning ? ` | ${payload.warning}` : '';
+
+      listaMeta.textContent =
+        `${listaSelect.value || '-'} | ${items.length} numero(s) | ${withLink} link(s)${warning}`;
+
+      renderNumberItems(listaItems, items);
+    }
+
+    function syncGabaritoCbNomeOptions(options, selectedTurma, selectedNome) {
+      const turma = selectedTurma || gabaritoCbTurmaSelect.value || '';
+      const nomes = options?.nomesByTurma?.[turma] || [];
+      fillSelect(gabaritoCbNomeSelect, nomes, selectedNome || '', 'Sem nomes');
+    }
+
+    function renderGabaritoCb(payload) {
+      const options = payload?.options || {};
+      const selected = payload?.selected || {};
+      const turmas = options.turmas || [];
+
+      fillSelect(gabaritoCbTurmaSelect, turmas, selected.turma || '', 'Sem turmas');
+      syncGabaritoCbNomeOptions(options, gabaritoCbTurmaSelect.value, selected.nome || '');
+
+      const items = payload?.items || [];
+      const withLink = items.filter((item) => item.hasLink && item.link).length;
+      const warning = payload?.warning ? ` | ${payload.warning}` : '';
+      const coluna = selected.coluna ? ` | coluna ${selected.coluna}` : '';
+
+      gabaritoCbMeta.textContent =
+        `${gabaritoCbTurmaSelect.value || '-'} | ${gabaritoCbNomeSelect.value || '-'}${coluna} | ${items.length} numero(s) | ${withLink} link(s)${warning}`;
+
+      renderNumberItems(gabaritoCbItems, items);
     }
 
     tabButtons.forEach((button) => {
@@ -410,6 +502,18 @@
       event.preventDefault();
       cache.lista = null;
       setActiveTab('lista');
+      loadData(true);
+    });
+
+    gabaritoCbTurmaSelect.addEventListener('change', () => {
+      const options = cache.gabaritoCb?.options || {};
+      syncGabaritoCbNomeOptions(options, gabaritoCbTurmaSelect.value, '');
+    });
+
+    gabaritoCbForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      cache.gabaritoCb = null;
+      setActiveTab('gabaritoCb');
       loadData(true);
     });
 

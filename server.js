@@ -16,6 +16,9 @@ const SHEET_GID = process.env.SHEET_GID || '';
 const LISTA_SHEET_NAME = process.env.SHEET_LISTA_NAME || 'Gabarito';
 const LISTA_COL_START = process.env.SHEET_LISTA_COL_START || 'A';
 const LISTA_COL_END = process.env.SHEET_LISTA_COL_END || 'ZZ';
+const GABARITO_CB_SHEET_NAME = process.env.SHEET_GABARITO_CB_NAME || 'GabaritoCB';
+const GABARITO_CB_COL_START = process.env.SHEET_GABARITO_CB_COL_START || 'A';
+const GABARITO_CB_COL_END = process.env.SHEET_GABARITO_CB_COL_END || 'ZZ';
 const GOOGLE_SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID || DEFAULT_SPREADSHEET_ID;
 const GOOGLE_SERVICE_ACCOUNT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '';
 const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY || '';
@@ -23,6 +26,7 @@ const GOOGLE_PRIVATE_KEY = process.env.GOOGLE_PRIVATE_KEY || '';
 const RANGE_DPC = 'B1:B7';
 const RANGE_AGENDA = 'G7:K43';
 const RANGE_LISTA = `${LISTA_COL_START}:${LISTA_COL_END}`;
+const RANGE_GABARITO_CB = `${GABARITO_CB_COL_START}:${GABARITO_CB_COL_END}`;
 const LISTA_LINK_CACHE_TTL_MS = Number(process.env.LISTA_LINK_CACHE_TTL_MS || 5 * 60 * 1000);
 
 const listaLinkCache = {
@@ -237,9 +241,9 @@ function fromA1Column(colLabel) {
   return total - 1;
 }
 
-function getListaColumnBounds() {
-  const startCol = fromA1Column(LISTA_COL_START);
-  const endCol = fromA1Column(LISTA_COL_END);
+function getSheetColumnBounds(startLabel, endLabel) {
+  const startCol = fromA1Column(startLabel);
+  const endCol = fromA1Column(endLabel);
 
   if (startCol < 0 || endCol < 0) {
     return {
@@ -259,6 +263,14 @@ function getListaColumnBounds() {
     startColLabel: toA1Column(minCol),
     endColLabel: toA1Column(maxCol)
   };
+}
+
+function getListaColumnBounds() {
+  return getSheetColumnBounds(LISTA_COL_START, LISTA_COL_END);
+}
+
+function getGabaritoCbColumnBounds() {
+  return getSheetColumnBounds(GABARITO_CB_COL_START, GABARITO_CB_COL_END);
 }
 
 function getSheetsClient() {
@@ -342,10 +354,9 @@ function extractListaCellLink(cell) {
   return '';
 }
 
-async function fetchListaCellsBySheetsApi() {
+async function fetchCellsBySheetsApi(sheetName, bounds) {
   const sheets = getSheetsClient();
-  const bounds = getListaColumnBounds();
-  const a1Range = `'${LISTA_SHEET_NAME}'!${bounds.startColLabel}:${bounds.endColLabel}`;
+  const a1Range = `'${sheetName}'!${bounds.startColLabel}:${bounds.endColLabel}`;
 
   const response = await sheets.spreadsheets.get({
     spreadsheetId: GOOGLE_SPREADSHEET_ID,
@@ -393,6 +404,10 @@ async function fetchListaCellsBySheetsApi() {
     sourceUrl: a1Range,
     linkCount
   };
+}
+
+async function fetchListaCellsBySheetsApi() {
+  return fetchCellsBySheetsApi(LISTA_SHEET_NAME, getListaColumnBounds());
 }
 
 async function fetchListaCellsByXlsx() {
@@ -482,10 +497,9 @@ async function fetchListaCellsByXlsx() {
   throw lastError;
 }
 
-async function fetchListaCellsByGviz() {
-  const bounds = getListaColumnBounds();
+async function fetchCellsByGviz(sheetName, bounds) {
   const payload = await fetchSheet(`${bounds.startColLabel}:${bounds.endColLabel}`, {
-    sheetName: LISTA_SHEET_NAME,
+    sheetName,
     allowGid: false
   });
 
@@ -517,6 +531,18 @@ async function fetchListaCellsByGviz() {
     sourceUrl: payload.sourceUrl,
     linkCount: 0
   };
+}
+
+async function fetchListaCellsByGviz() {
+  return fetchCellsByGviz(LISTA_SHEET_NAME, getListaColumnBounds());
+}
+
+async function fetchGabaritoCbCellsBySheetsApi() {
+  return fetchCellsBySheetsApi(GABARITO_CB_SHEET_NAME, getGabaritoCbColumnBounds());
+}
+
+async function fetchGabaritoCbCellsByGviz() {
+  return fetchCellsByGviz(GABARITO_CB_SHEET_NAME, getGabaritoCbColumnBounds());
 }
 
 function isExerciseNumber(text) {
@@ -743,6 +769,161 @@ async function fetchListaData(selectedList) {
     },
     selected: {
       lista: selected.lista
+    },
+    items: selected.items,
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function buildGabaritoCbCatalogFromCells(cells) {
+  const byColumn = new Map();
+
+  for (const cell of cells || []) {
+    if (!cell || !Number.isFinite(cell.col)) continue;
+    if (!byColumn.has(cell.col)) byColumn.set(cell.col, []);
+    byColumn.get(cell.col).push(cell);
+  }
+
+  const columns = [];
+
+  for (const [col, columnCells] of Array.from(byColumn.entries()).sort((a, b) => a[0] - b[0])) {
+    const sortedColumn = [...columnCells].sort((a, b) => a.row - b.row);
+    const nomeCell = sortedColumn.find((cell) => cell.row === 1 && String(cell.text || '').trim());
+    const turmaCell = sortedColumn.find((cell) => cell.row === 2 && String(cell.text || '').trim());
+
+    if (!nomeCell || !turmaCell) continue;
+
+    const nome = String(nomeCell.text || '').trim();
+    const turma = String(turmaCell.text || '').trim();
+    const uniqueByCell = new Map();
+
+    for (const cell of sortedColumn) {
+      if (cell.row <= 2) continue;
+
+      const numero = String(cell.text || '').trim();
+      if (!isExerciseNumber(numero)) continue;
+
+      uniqueByCell.set(cell.a1, {
+        numero,
+        link: String(cell.link || '').trim(),
+        hasLink: Boolean(String(cell.link || '').trim()),
+        cell: cell.a1,
+        row: cell.row,
+        col: cell.col
+      });
+    }
+
+    const items = Array.from(uniqueByCell.values())
+      .sort((a, b) => {
+        const aNum = Number(a.numero);
+        const bNum = Number(b.numero);
+        if (a.row !== b.row) return a.row - b.row;
+        if (a.col !== b.col) return a.col - b.col;
+        if (Number.isFinite(aNum) && Number.isFinite(bNum)) return aNum - bNum;
+        return String(a.numero).localeCompare(String(b.numero), 'pt-BR');
+      })
+      .map(({ row, col: itemCol, ...rest }) => rest);
+
+    columns.push({
+      turma,
+      nome,
+      col,
+      a1Column: toA1Column(col - 1),
+      items,
+      withLink: items.filter((item) => item.hasLink).length
+    });
+  }
+
+  const turmas = [];
+  const nomesByTurma = {};
+
+  for (const column of columns) {
+    if (!turmas.some((turma) => normalizeText(turma) === normalizeText(column.turma))) {
+      turmas.push(column.turma);
+    }
+
+    if (!nomesByTurma[column.turma]) {
+      nomesByTurma[column.turma] = [];
+    }
+
+    if (
+      !nomesByTurma[column.turma].some((nome) => normalizeText(nome) === normalizeText(column.nome))
+    ) {
+      nomesByTurma[column.turma].push(column.nome);
+    }
+  }
+
+  return {
+    turmas,
+    nomesByTurma,
+    columns
+  };
+}
+
+function selectGabaritoCbColumn(columns, selectedTurma, selectedNome) {
+  if (!Array.isArray(columns) || !columns.length) return null;
+
+  const turmaKey = normalizeText(selectedTurma);
+  const nomeKey = normalizeText(selectedNome);
+
+  const columnsByTurma = turmaKey
+    ? columns.filter((column) => normalizeText(column.turma) === turmaKey)
+    : columns;
+  const scopedColumns = columnsByTurma.length ? columnsByTurma : columns;
+
+  if (nomeKey) {
+    const byNome = scopedColumns.find((column) => normalizeText(column.nome) === nomeKey);
+    if (byNome) return byNome;
+  }
+
+  return scopedColumns[0];
+}
+
+async function fetchGabaritoCbData(selectedTurma, selectedNome) {
+  const bounds = getGabaritoCbColumnBounds();
+  const range = `${bounds.startColLabel}:${bounds.endColLabel}`;
+
+  let sourcePayload;
+  let warning = '';
+
+  try {
+    sourcePayload = await fetchGabaritoCbCellsBySheetsApi();
+  } catch (apiError) {
+    sourcePayload = await fetchGabaritoCbCellsByGviz();
+    warning = 'Nao foi possivel carregar os hyperlinks automaticamente a partir da aba GabaritoCB.';
+    if (apiError?.message) {
+      warning += ` (${apiError.message})`;
+    }
+  }
+
+  const catalog = buildGabaritoCbCatalogFromCells(sourcePayload.cells);
+  if (!catalog.columns.length) {
+    throw new Error(`Nenhuma coluna com nome e turma foi encontrada em ${GABARITO_CB_SHEET_NAME}!${range}.`);
+  }
+
+  const selected = selectGabaritoCbColumn(catalog.columns, selectedTurma, selectedNome);
+  if (!selected) {
+    throw new Error('Nao foi possivel determinar a coluna selecionada na aba GabaritoCB.');
+  }
+
+  if (!warning && selected.withLink === 0) {
+    warning = 'Nenhum hyperlink foi encontrado para o nome selecionado.';
+  }
+
+  return {
+    sheet: GABARITO_CB_SHEET_NAME,
+    range,
+    source: sourcePayload.source,
+    sourceUrl: sourcePayload.sourceUrl,
+    warning,
+    options: {
+      turmas: catalog.turmas,
+      nomesByTurma: catalog.nomesByTurma
+    },
+    selected: {
+      turma: selected.turma,
+      nome: selected.nome,
+      coluna: selected.a1Column
     },
     items: selected.items,
     updatedAt: new Date().toISOString()
@@ -1317,6 +1498,16 @@ app.get('/api/lista', async (req, res) => {
   } catch (err) {
     console.error('[api/lista] error:', err);
     res.status(500).json({ error: 'Falha ao buscar dados da aba Gabarito', detail: err.message });
+  }
+});
+
+app.get('/api/gabarito-cb', async (req, res) => {
+  try {
+    const data = await fetchGabaritoCbData(req.query.turma, req.query.nome);
+    res.json(data);
+  } catch (err) {
+    console.error('[api/gabarito-cb] error:', err);
+    res.status(500).json({ error: 'Falha ao buscar dados da aba GabaritoCB', detail: err.message });
   }
 });
 

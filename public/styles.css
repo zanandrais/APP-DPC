@@ -123,6 +123,7 @@ main {
 
 .tab-switch {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 6px;
   border-radius: 12px;
@@ -329,6 +330,10 @@ main {
 .lista-controls label {
   display: grid;
   gap: 6px;
+}
+
+.lista-spacer {
+  min-height: 1px;
 }
 
 .lista-controls span {

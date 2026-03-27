@@ -14,3 +14,9 @@ services:
         value: A
       - key: SHEET_LISTA_COL_END
         value: ZZ
+      - key: SHEET_GABARITO_CB_NAME
+        value: GabaritoCB
+      - key: SHEET_GABARITO_CB_COL_START
+        value: A
+      - key: SHEET_GABARITO_CB_COL_END
+        value: ZZ
