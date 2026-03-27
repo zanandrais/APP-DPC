@@ -180,6 +180,66 @@
       return params.toString();
     }
 
+    function wait(ms) {
+      return new Promise((resolve) => {
+        window.setTimeout(resolve, ms);
+      });
+    }
+
+    async function readErrorMessage(response) {
+      let rawText = '';
+      try {
+        rawText = await response.text();
+      } catch (_error) {
+        return `Erro ao buscar dados (${response.status})`;
+      }
+
+      try {
+        const payload = JSON.parse(rawText);
+        return payload?.detail || payload?.error || `Erro ao buscar dados (${response.status})`;
+      } catch (_error) {
+        const compact = String(rawText || '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 180);
+        return compact || `Erro ao buscar dados (${response.status})`;
+      }
+    }
+
+    async function fetchJsonWithRetry(endpoint, retries = 2) {
+      let lastError = new Error('Erro ao buscar dados');
+
+      for (let attempt = 0; attempt <= retries; attempt += 1) {
+        try {
+          const response = await fetch(endpoint, { cache: 'no-store' });
+          if (response.ok) {
+            return await response.json();
+          }
+
+          const message = await readErrorMessage(response);
+          lastError = new Error(message);
+
+          if (attempt < retries && [502, 503, 504].includes(response.status)) {
+            statusEl.textContent = 'Aguardando o Render responder...';
+            await wait(1500 * (attempt + 1));
+            continue;
+          }
+
+          throw lastError;
+        } catch (error) {
+          lastError = error instanceof Error ? error : new Error(String(error || 'Erro ao buscar dados'));
+
+          if (attempt < retries) {
+            statusEl.textContent = 'Tentando novamente...';
+            await wait(1500 * (attempt + 1));
+            continue;
+          }
+        }
+      }
+
+      throw lastError;
+    }
+
     async function loadData(force = false) {
       statusEl.textContent = 'Carregando...';
       reloadBtn.disabled = true;
@@ -200,13 +260,7 @@
           if (query) endpoint += `?${query}`;
         }
 
-        const res = await fetch(endpoint, { cache: 'no-store' });
-        if (!res.ok) {
-          const payload = await res.json().catch(() => ({}));
-          throw new Error(payload?.detail || payload?.error || 'Erro ao buscar dados');
-        }
-
-        const payload = await res.json();
+        const payload = await fetchJsonWithRetry(endpoint);
         cache[activeTab] = payload;
         renderByTab(activeTab, payload);
         statusEl.textContent = 'Dados atualizados agora';
